@@ -1,0 +1,112 @@
+# Contributing to InvoCare SDLC Skills
+
+Guide for **changing** a rule, skill, agent, or checker and sending it back. If you only want to *install or update* the skills, see `README.md` — you don't need to clone.
+
+---
+
+## How to contribute (clone → branch → PR)
+
+```sh
+git clone git@github.com:trieuquanghuy/invocare-sdlc-skills.git
+cd invocare-sdlc-skills
+git switch -c fix/short-description           # e.g. fix/rca-evidence-table
+#   …edit a rule / skill / agent / checker…
+git add -p
+git commit -m "fix(create-rca): tighten evidence table check"   # short, subject-only
+git push -u origin HEAD
+gh pr create --fill
+```
+
+- **One focused change per PR.** Short subject-only commits, no AI/automation attribution — see `rules/git-safety.md` **G11**.
+- After merge, optionally cut a release tag (CalVer): `git tag v$(date +%Y.%m.%d) && git push --tags`. Git history is the change log — keep commit subjects clear.
+- Update your clone with `git pull`.
+
+---
+
+## Sync your `.claude/` edits up into the clone
+
+You edit skills in a real workspace's `.claude/` while doing ticket work, then bring those edits back into the clone to open a PR. `contribute-skills.sh` (run from the clone) copies the **shared payload** (`rules/ agents/ scripts/ skills/ CLAUDE.md HOW-TO-USE.md`) **one way — `.claude/` → clone**. It honours the same fence as `update-skills.sh` — it never touches `settings.local.json`, `.mcp.json`, `skills/_local/`, or repo meta — and **never deletes**. (The reverse direction — installing/updating a workspace from the repo — is `update-skills.sh`'s job, not this script's.)
+
+You never pass the repo path (the script lives in the clone). The workspace defaults to the clone's parent directory — the usual layout where the clone sits inside the workspace — so from the standard setup you can run it with no arguments:
+
+```sh
+./contribute-skills.sh --dry-run            # preview (workspace = clone's parent dir)
+./contribute-skills.sh                      # apply, then branch / commit / PR
+
+./contribute-skills.sh <path-to-workspace>  # if your clone lives outside the workspace, pass it
+```
+
+- **Never commits.** It updates the clone's working tree, then prints the branch → `git add -p` → commit → `gh pr create` steps. You craft the focused PR (one change per PR, subject-only commit — see G11).
+- **`--dry-run` first** (recommended). It prints a count plus only the files whose **content** would change — full paths, each labelled `new` or `updated` (e.g. `updated  skills/task-status/SKILL.md`) — and writes nothing. Timestamp/permission-only churn (which git ignores) is filtered out, so the list is just what matters. "Already in sync" means no file contents differ.
+- **No `--delete`:** retiring a skill is a manual removal on both sides (same limitation as the consumer updater).
+- **Layout note:** the canonical mapping is repo-root ↔ `.claude/` root, so `HOW-TO-USE.md` lives at `.claude/HOW-TO-USE.md`. If a workspace keeps it under `.claude/skills/` (older Drive-sync layout), the script skips it and tells you to relocate it.
+
+---
+
+## Before you edit (the gate + rules)
+
+This repo's own rules apply to the edits you make here:
+
+- **Pre-implementation gate.** Before editing any executable file (`scripts/*.sh`, checker logic), follow the `code-lesson` gate in `CLAUDE.md` (skim `high` **and** `medium`, fetch relevant ids). Pure markdown/prose edits — most skill bodies, rules, templates — fall in the skip list. The layer-2 hook (`scripts/sdlc-gate.sh`, wired in `settings.local.json`) enforces this on code files.
+- **Output Guardian** (`rules/output-guardian.md`): no tool / AI / pipeline / skill names in anything a stakeholder sees — including commit messages and PR bodies.
+- **Agents safety** (`rules/agents-safety.md`): checker dispatches use the `pipeline-checker` subagent, never `Task(general-purpose)`.
+
+---
+
+## Layout
+
+```
+CLAUDE.md                    @-imports the rule set (activated at the workspace root)
+rules/                       cross-cutting rules (output-guardian, git-safety, sdlc-gates, …)
+agents/                      checker + reviewer subagents (pipeline-checker.md, pr-reviewer.md)
+scripts/                     sdlc-gate.sh (layer-2 hook), jira-attachments.sh
+skills/
+  _shared/contracts/         checker-contract.md, output-guardian-linter.md, iteration-loop.md
+  _shared/templates/         session-log-template.md, deploy-result-template.md
+  _shared/references/        firebase-db-map.md, template-artifact-protocol.md
+  _shared/skill-pipeline-process.md   cross-skill workflow overview
+  _local/                    YOUR personal skills — gitignored, never shared
+  <skill>/SKILL.md           one dir per skill (+ checker-prompt.md / references/ where used)
+```
+
+Active skills: `apply-fix`, `create-pr`, `create-rca`, `create-spec`, `impact-analysis`, `pr-code-review-fixer`, `prepare-uat`, `publish-rca`, `summarize-firebase-session`, `task-status`, `ticket-comment`.
+
+Conventions:
+- Per-skill templates → `<skill>/references/`; templates used by ≥2 skills → `_shared/templates/`.
+- Skill-specific checker rules → `<skill>/checker-prompt.md`; cross-skill schema → `_shared/contracts/`.
+- `disable-model-invocation: true` is set on every write/destructive skill — don't remove it without checking.
+
+---
+
+## Editing a `SKILL.md`
+
+1. **Quality Bar is the checker's source of truth.** Add a Quality Bar item → enforce it in the matching `checker-prompt.md`.
+2. **Don't renumber steps** — Quality Bar items and downstream skills reference step numbers. Insert new steps as `Na.5`.
+3. **Keep the `## Next step` router at the bottom** — it's the workflow router.
+4. **Cite the global rules** every output-bearing skill must respect.
+
+## Editing a `checker-prompt.md`
+
+1. **Don't change the output schema casually** — calling skills parse the JSON (`Parse the JSON result block`); a schema change needs the matching SKILL.md update.
+2. `fixable: true` only when the fix is mechanical; otherwise `fixable: false`, `suggested_fix: null`.
+3. Severity is binary: `blocker` (verdict=FAIL) / `warning` (verdict=WARN); `info` is advisory.
+4. Output Guardian applies inside the JSON — no tool names / session IDs in `issue` or `suggested_fix`.
+
+---
+
+## Testing
+
+Skills are LLM prompts — there's no automated harness. Smoke-test the changed skill in a throwaway conversation on a real ticket and confirm: expected output sections, no tool/session-id leakage, and the `## Next step` block matches the router. For a checker change, paste the rubric plus a known-bad artifact and confirm it returns a `blocker` verdict.
+
+---
+
+## Common pitfalls
+
+| Pitfall | Why it bites |
+|---|---|
+| Renumbering steps | Quality Bar items and downstream prompts reference step numbers |
+| Adding a Quality Bar item without updating the checker | Skill claims "verified" but isn't |
+| Editing a file under `_shared/` without grepping dependents | ≥2 skills depend on it |
+| Removing `disable-model-invocation: true` from a write skill | Lets the model trigger destructive ops from conversation context |
+| Tool / AI / pipeline names in output | Output Guardian violation — leaks automation language |
+| Committing a personal experiment | Keep it in `skills/_local/` (gitignored), not in a shared skill dir |

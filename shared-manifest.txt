@@ -1,0 +1,11 @@
+# Shared payload — the top-level items that map 1:1 onto a workspace .claude/.
+# SINGLE SOURCE OF TRUTH read by BOTH update-skills.sh and contribute-skills.sh.
+# One item per line; lines starting with # and blank lines are ignored.
+# Add a new shared top-level file/dir here once and both flows pick it up — there is
+# no second list to keep in sync. The manifest itself is never copied into .claude/.
+rules
+agents
+scripts
+skills
+CLAUDE.md
+HOW-TO-USE.md

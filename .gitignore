@@ -1,0 +1,21 @@
+# per-machine — never commit
+settings.local.json
+.mcp.json
+.skills-sync-state
+.skills-sync-manifest
+
+# personal, non-shared skills (kept local, never published)
+skills/_local/
+
+# consumer update / migration backups
+.update-backup-*/
+CLAUDE.md.backup-*
+
+# env / secrets (belt-and-suspenders)
+.env
+.env.*
+
+# os / editor / old-sync cruft
+.DS_Store
+*.bak
+*.drive

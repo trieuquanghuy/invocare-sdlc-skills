@@ -1,0 +1,10 @@
+{
+  "__comment__": "PLACEHOLDER — do NOT commit a real .mcp.json (it holds secrets; it is gitignored). This lists WHICH MCP servers the skills expect, not their real config. Get the actual server definitions and YOUR OWN credentials from the team lead, then create <workspace>/.mcp.json (at the umbrella root, not inside .claude/).",
+  "mcpServers": {
+    "firebase-explorer": { "__note__": "RTDB / Firestore / Elasticsearch access — needs your credentials" },
+    "reposphere":        { "__note__": "code intelligence / cross-repo search" },
+    "code-lesson":       { "__note__": "coding-lessons corpus — drives the pre-implementation gate (and the layer-2 hook)" },
+    "code-review":       { "__note__": "manager-hub PR review driver" },
+    "atlassian":         { "__note__": "Jira + Confluence — often a claude.ai connector rather than a stdio server" }
+  }
+}
