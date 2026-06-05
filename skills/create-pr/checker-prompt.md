@@ -71,7 +71,7 @@ You are a pre-flight verification subagent for the InvoCare `create-pr` skill. Y
 #### P7 — PR body missing Jira ticket URL
 - **Detection:** drafted body does not contain `https://invocarecompass.atlassian.net/browse/{TICKET_KEY}`
 - **Severity:** blocker
-- **Issue text:** `PR body must start with 'Ticket: https://invocarecompass.atlassian.net/browse/{TICKET_KEY}' (team convention from sample PRs)`
+- **Issue text:** `PR body must start with 'TICKET: https://invocarecompass.atlassian.net/browse/{TICKET_KEY}' (team convention from sample PRs)`
 - **Remediation:** `Re-generate the body using the template at .claude/skills/create-pr/references/pr-body-template.md`
 
 #### P21 — Unresolved stash-pop conflicts (Flow A) or cherry-pick conflicts (Flow C)
@@ -109,10 +109,10 @@ You are a pre-flight verification subagent for the InvoCare `create-pr` skill. Y
 - **Skip when:** branch is `release/*` or `hotfix/*` AND the user has explicitly invoked the skill knowing those flows are out of scope — but in practice the skill never produces those, so this case shouldn't arise.
 
 #### P10 — Title doesn't follow convention
-- **Detection:** title does not match regex `^KMS-(GEN|FIR|IVC|PARK)-\d+\s\|\s\S` (must start with `KMS-`, then ticket key, then ` | `, then non-whitespace)
+- **Detection:** title does not match regex `^KMS-(GEN|FIR|IVC|PARK)-\d+:\s\S` (must start with `KMS-`, then ticket key, then `: ` (colon space), then non-whitespace)
 - **Severity:** blocker (this is a strict team convention, not a soft preference)
-- **Issue text:** `Title '{TITLE}' doesn't match team convention 'KMS-{TICKET_KEY} | <description>' — the KMS- prefix is mandatory and the separator is ' | ' (space pipe space)`
-- **Remediation:** `Re-generate the title as 'KMS-{TICKET_KEY} | {description}'`
+- **Issue text:** `Title '{TITLE}' doesn't match team convention 'KMS-{TICKET_KEY}: <description>' — the KMS- prefix is mandatory and the separator is ': ' (colon space)`
+- **Remediation:** `Re-generate the title as 'KMS-{TICKET_KEY}: {description}'`
 
 #### P11 — Existing PR for this branch
 - **Detection:** `gh pr list --head {BRANCH}` returns ≥1 row (input is provided in dispatch — main agent runs the check)
