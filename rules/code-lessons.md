@@ -1,14 +1,3 @@
-@.claude/rules/output-guardian.md
-@.claude/rules/firebase-safety.md
-@.claude/rules/secrets-safety.md
-@.claude/rules/git-safety.md
-@.claude/rules/agents-safety.md
-@.claude/rules/code-search.md
-@.claude/rules/sdlc-gates.md
-@.claude/rules/code-comments.md
-@.claude/rules/engineering-conduct.md
-
-
 ## Code-Lessons MCP (MANDATORY PRE-IMPLEMENTATION GATE)
 
 **HARD RULE — NON-NEGOTIABLE. NO EXCEPTIONS BEYOND THE EXPLICIT SKIP LIST BELOW.**

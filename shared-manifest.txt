@@ -3,9 +3,10 @@
 # One item per line; lines starting with # and blank lines are ignored.
 # Add a new shared top-level file/dir here once and both flows pick it up — there is
 # no second list to keep in sync. The manifest itself is never copied into .claude/.
+# NOTE: CLAUDE.md is intentionally NOT here — it's the workspace-ROOT entry point, generated
+# by update-skills.sh from the rules/ files (a managed block), not copied from the repo.
 rules
 agents
 scripts
 skills
-CLAUDE.md
 HOW-TO-USE.md

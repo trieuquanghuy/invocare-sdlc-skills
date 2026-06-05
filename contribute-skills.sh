@@ -62,7 +62,7 @@ CLAUDE="$WS/.claude"
 # is left untouched simply by not being listed. The list is read from shared-manifest.txt —
 # the SINGLE SOURCE OF TRUTH, also read by update-skills.sh. A built-in default covers a clone
 # that predates the manifest.
-SHARED_DEFAULT="rules agents scripts skills CLAUDE.md HOW-TO-USE.md"
+SHARED_DEFAULT="rules agents scripts skills HOW-TO-USE.md"
 if [ -f "$CLONE/shared-manifest.txt" ]; then
   SHARED="$(grep -vE '^[[:space:]]*(#|$)' "$CLONE/shared-manifest.txt" | tr '\n' ' ')"
 else

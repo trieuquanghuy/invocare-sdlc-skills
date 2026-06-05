@@ -129,7 +129,7 @@ mkdir -p "$WS/.claude"
 TS="$(date +%Y%m%d-%H%M%S)"
 BK="$WS/.claude/.update-backup-$TS"
 
-SHARED_DEFAULT="rules agents scripts skills CLAUDE.md HOW-TO-USE.md"
+SHARED_DEFAULT="rules agents scripts skills HOW-TO-USE.md"
 if [ -f "$TMP/x/shared-manifest.txt" ]; then
   SHARED="$(grep -vE '^[[:space:]]*(#|$)' "$TMP/x/shared-manifest.txt" | tr '\n' ' ')"
 else
@@ -158,16 +158,42 @@ NEW_N="$(printf '%s\n' "$CHANGES" | grep -c '^  new ' || true)"
 UPD_N="$(printf '%s\n' "$CHANGES" | grep -c '^  updated ' || true)"
 [ -n "$CHANGES" ] && printf '%s\n' "$CHANGES"
 
-# 3. Activate the @-imported rules via a workspace-root CLAUDE.md symlink → .claude/CLAUDE.md.
-#    Never clobber a real CLAUDE.md the workspace already has: only create/refresh the symlink
-#    when there's no CLAUDE.md, or when it's already our symlink. If a real file is in the way,
-#    leave it alone and tell the user how to wire the rules in themselves.
+# 3. Maintain the workspace-ROOT CLAUDE.md (sibling of .claude/) so Claude Code loads the
+#    shared rules natively — no symlink. We manage ONLY a marked block of @-imports built from
+#    the installed rules/*.md; anything OUTSIDE the markers (your own content) is preserved.
+#    Re-runs refresh the block, so new rules are picked up automatically.
 if [ -z "$DRY" ]; then
-  if [ ! -e "$WS/CLAUDE.md" ] || [ -L "$WS/CLAUDE.md" ]; then
-    ln -sfn .claude/CLAUDE.md "$WS/CLAUDE.md"
+  BEGIN='<!-- invocare-skills:begin (managed by update-skills.sh — do not edit inside) -->'
+  END='<!-- invocare-skills:end -->'
+  ROOT_MD="$WS/CLAUDE.md"
+  BLOCKFILE="$TMP/claude-block"
+  {
+    printf '%s\n' "$BEGIN"
+    for f in "$WS"/.claude/rules/*.md; do
+      [ -e "$f" ] && printf '@.claude/rules/%s\n' "$(basename "$f")"
+    done
+    printf '%s\n' "$END"
+  } > "$BLOCKFILE"
+
+  if [ -L "$ROOT_MD" ]; then
+    # Legacy install left a symlink — replace it with a real managed file.
+    rm -f "$ROOT_MD"; cp "$BLOCKFILE" "$ROOT_MD"
+    echo "  CLAUDE.md: replaced the old symlink with a managed rules block"
+  elif [ -f "$ROOT_MD" ] && grep -qF "$BEGIN" "$ROOT_MD"; then
+    # Managed block already present — refresh it in place, keep everything else.
+    awk -v bf="$BLOCKFILE" -v b="$BEGIN" -v e="$END" '
+      $0==b { while ((getline l < bf) > 0) print l; close(bf); skip=1; next }
+      skip && $0==e { skip=0; next }
+      !skip { print }
+    ' "$ROOT_MD" > "$ROOT_MD.tmp" && mv "$ROOT_MD.tmp" "$ROOT_MD"
+    echo "  CLAUDE.md: refreshed the managed rules block"
+  elif [ -f "$ROOT_MD" ]; then
+    # Your own CLAUDE.md — prepend the block, keep all your content below it.
+    { cat "$BLOCKFILE"; printf '\n'; cat "$ROOT_MD"; } > "$ROOT_MD.tmp" && mv "$ROOT_MD.tmp" "$ROOT_MD"
+    echo "  CLAUDE.md: added the managed rules block above your existing content (kept intact)"
   else
-    echo "note: $WS/CLAUDE.md already exists and is not our symlink — left untouched."
-    echo "      To load the shared rules, add this import line to it:  @.claude/CLAUDE.md"
+    cp "$BLOCKFILE" "$ROOT_MD"
+    echo "  CLAUDE.md: created at the workspace root with the shared rules"
   fi
 fi
 

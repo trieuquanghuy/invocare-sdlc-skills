@@ -2,7 +2,7 @@
 
 Shared Claude Code skill set for the InvoCare / FireHawk (Barndoor) workflow — skills, rules, subagents, and the layer-2 SDLC gate hook. This repo is the **source of truth**; `main` is always current.
 
-> The repo root **is** the contents of a `.claude/` directory (it maps straight into a workspace's `.claude/`). `CLAUDE.md` ships inside and is activated by a one-line symlink at the workspace root.
+> The repo root **is** the contents of a `.claude/` directory (it maps straight into a workspace's `.claude/`). The shared rules live in `.claude/rules/`; the installer generates a small managed block of `@`-imports in the **workspace-root** `CLAUDE.md` (a sibling of `.claude/`) to load them — no symlink, and your own `CLAUDE.md` content is preserved.
 
 ---
 
@@ -21,7 +21,7 @@ In short: **consumers never clone** — one script (`update-skills.sh`) installs
 
 ## What's shared vs personal (the fence)
 
-`.gitignore` is the boundary. **Shared** (tracked, synced): `rules/`, `skills/` (incl. `skills/_shared/skill-pipeline-process.md`), `agents/`, `scripts/`, `CLAUDE.md`. **Personal / per-machine** (never tracked, never synced): `settings.local.json`, `.mcp.json`, and any personal skills you keep under `skills/_local/`.
+`.gitignore` is the boundary. **Shared** (tracked, synced): `rules/`, `skills/` (incl. `skills/_shared/skill-pipeline-process.md`), `agents/`, `scripts/`. The workspace-root `CLAUDE.md` is **generated** by the installer from `rules/` (a managed block), not shipped or synced. **Personal / per-machine** (never tracked, never synced): `settings.local.json`, `.mcp.json`, and any personal skills you keep under `skills/_local/`.
 
 The consumer updater honors this fence: it never writes `settings.local.json` / `.mcp.json` / `skills/_local/`, and never deletes — overwrites are backed up to `.claude/.update-backup-<timestamp>/`.
 
@@ -42,4 +42,4 @@ The consumer updater honors this fence: it never writes `settings.local.json` / 
 
 - The consumer sync has no `--delete`: if a shared skill is *retired* from the repo, consumers keep a stale local copy until they remove it by hand.
 - The one-line `curl … | bash` install runs a remote script unreviewed. If you'd rather read before running, download `update-skills.sh` first, skim it, then run it locally — and pin a CalVer tag with `--ref v2026.06.01` (see Versioning) instead of `main` for a reproducible install.
-- Plugins/marketplace were considered but can't carry the `CLAUDE.md` `@`-imported rules, so this clone/tarball model is used instead — it delivers the rules too.
+- Plugins/marketplace were considered but can't carry the `@`-imported rules + the root-`CLAUDE.md` activation, so this clone/tarball model is used instead — it delivers the rules too.

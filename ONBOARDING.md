@@ -15,7 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/trieuquanghuy/invocare-sdlc-skills/
 ```
 The workspace defaults to the current directory. Add `--dry-run` to preview first (`… | bash -s -- --dry-run`) or `--ref v2026.06.01` to pin a release — when piping, flags go after `-s --`. (Prefer an explicit path? `… | bash -s -- <workspace>` still works.)
 
-It safely adopts the shared set even if you already have a populated `.claude/` — overwrites are backed up to `.claude/.update-backup-<timestamp>/`, and your personal files are left alone. It does **not** create config files for you (step 2), and it never touches a `CLAUDE.md` your workspace already has: it only adds the root `CLAUDE.md` symlink when none exists (otherwise it tells you the one import line to add).
+It safely adopts the shared set even if you already have a populated `.claude/` — overwrites are backed up to `.claude/.update-backup-<timestamp>/`, and your personal files are left alone. It does **not** create config files for you (step 2). For the rules, it maintains a small **managed block** of `@`-imports in your workspace-root `CLAUDE.md` (a sibling of `.claude/`): it creates the file if you don't have one, or inserts the block **above your existing content** if you do — your own `CLAUDE.md` text is never overwritten, and re-runs just refresh the block.
 
 **What you'll see** — the installer lists only what actually changed (each `new` or `updated`, full paths), then a one-line summary:
 ```text
@@ -30,7 +30,7 @@ Updating /path/to/workspace/.claude/ …
   Left untouched: your settings.local.json, .mcp.json, and skills/_local/.
   First time? Create .claude/settings.local.json and <workspace>/.mcp.json — ask the maintainer for the config.
 ```
-If your workspace already has its own `CLAUDE.md`, you'll also see a line confirming it was *left untouched* with the one import line to add (`@.claude/CLAUDE.md`). On later runs:
+If your workspace already has its own `CLAUDE.md`, you'll see `CLAUDE.md: added the managed rules block above your existing content (kept intact)`. On later runs:
 - **Nothing changed upstream** → `Already up to date: main @ <commit>` (no download).
 - **You deleted a skill/file locally** → it detects the gap and re-syncs to restore it.
 - **Force a full re-sync** (e.g. to undo a local edit) → add `--force`.
@@ -88,8 +88,8 @@ That's the contributor path (the only one that clones): see `CONTRIBUTING.md` �
 | The installer can't download / "could not download …" | Wrong `--ref` (branch or tag name), the repo's `main` has no content pushed yet, or curl is blocked by a proxy (it falls back to `gh` — `gh auth login` then re-run). The repo is public, so no access request is needed. |
 | Skills don't show under `/` | `<workspace>/.claude/skills/` missing, or you didn't open Claude Code in `<workspace>`. Re-run the install one-liner (step 1). |
 | A skill errors when it calls a tool | `<workspace>/.mcp.json` not set up (step 2) — get the config/creds from the maintainer. |
-| An edit gets blocked by an "SDLC gate" message | Intended — the code-lessons pre-edit gate (`CLAUDE.md`). Ensure `jq` is installed and the hook in `settings.local.json` points at `.claude/scripts/sdlc-gate.sh`. |
-| Rules don't seem to apply | Confirm `<workspace>/CLAUDE.md` loads the rules. The installer symlinks it to `.claude/CLAUDE.md` only when no `CLAUDE.md` exists; if you already had your own, it's left untouched — add `@.claude/CLAUDE.md` to it. |
+| An edit gets blocked by an "SDLC gate" message | Intended — the code-lessons pre-edit gate (`.claude/rules/code-lessons.md`). Ensure `jq` is installed and the hook in `settings.local.json` points at `.claude/scripts/sdlc-gate.sh`. |
+| Rules don't seem to apply | Confirm `<workspace>/CLAUDE.md` exists and contains the `<!-- invocare-skills:begin -->` block of `@.claude/rules/*.md` imports. Re-run the installer to (re)generate it. |
 
 ---
 
