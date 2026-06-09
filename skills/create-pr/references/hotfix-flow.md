@@ -115,11 +115,11 @@ GH_HOST=ivc.ghe.com gh pr create \
   --repo FireHawk/{REPO_NAME} \
   --base main \
   --head hotfix/{TICKET_KEY}-{kebab} \
-  --title "KMS-{TICKET_KEY}: Hotfix - {short imperative description}" \
-  --body "TICKET: https://invocarecompass.atlassian.net/browse/{TICKET_KEY}"
+  --title "KMS-{TICKET_KEY} | Hotfix: {short imperative description}" \
+  --body "Ticket: https://invocarecompass.atlassian.net/browse/{TICKET_KEY}"
 ```
 
-**Body MUST be exactly the single `TICKET:` line.** Do NOT include:
+**Body MUST be exactly the single `Ticket:` line.** Do NOT include:
 - Back-merge narrative or rationale
 - "Hotfix promotion — cherry-picks from develop…" explanations
 - "Requires Tech Lead approval" reminders (the strategy enforces this, not the PR body)
@@ -157,7 +157,7 @@ These reaffirm the gates above — if you catch yourself doing any of these, sto
 |---|---|
 | Cherry-picking the develop merge commit (e.g. a `Merge pull request #N from …` commit object) | Cherry-pick the **original feature commits** from inside the merged branch. The `git log --grep --no-merges` filter in H1 already excludes merge commits. |
 | Branching the hotfix off **local** `main` when it has diverged from origin/main | H3b branches off `origin/main` exactly to avoid this. Local divergence is a separate cleanup the user owns. |
-| Writing a multi-paragraph PR body explaining what a hotfix is, why this one needs Tech Lead approval, what the back-merge plan is | The body is exactly one `TICKET:` line. The Confluence Git Branching & Release Strategy is the source of truth — not the PR body. |
+| Writing a multi-paragraph PR body explaining what a hotfix is, why this one needs Tech Lead approval, what the back-merge plan is | The body is exactly one `Ticket:` line. The Confluence Git Branching & Release Strategy is the source of truth — not the PR body. |
 | Auto-popping the prep stash after PR creation | Never auto-pop. The stash is the user's choice to recover. |
 | Re-running Step 1 (lessons code review) on cherry-picked commits | Skip Step 1 in hotfix mode. The cherry-picked commits were already gated at the original PR (feature → develop) review — re-flagging would re-raise resolved issues. |
 | Re-running Step 2 (pre-flight checker) on the hotfix branch | DO run the checker — generic PR-creation gates (P2, P6, P9, P10, P13, P14, P15, etc.) still apply. Only Step 1 (lessons review) is skipped in hotfix mode. |

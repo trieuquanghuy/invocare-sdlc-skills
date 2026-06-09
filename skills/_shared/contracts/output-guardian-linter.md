@@ -44,7 +44,7 @@ You are a verification subagent that scans an assembled stakeholder-facing body 
 - **Severity:** blocker
 - **Issue text:** `Body references a session identifier at body:<line>. Output Guardian forbids session IDs in stakeholder text — they belong in session-log.md only.`
 - **Fixable:** false
-- **Skip when (carve-out per `.claude/rules/output-guardian.md`):**
+- **Skip when — Carve-out A (`/ticket-comment` Session deploy, per `.claude/rules/output-guardian.md`):**
   - `host` is `jira-comment` AND
   - the matched line is inside a section block whose heading is `**Session deploy**` or `### Session deploy` (the block runs from the heading line until the next markdown heading of equal-or-higher level OR end of body) AND
   - the matched line conforms to the carve-out row shape — a markdown list bullet (NOT a table row) carrying all three fields (session id, timestamp, target database):
@@ -54,8 +54,16 @@ You are a verification subagent that scans an assembled stakeholder-facing body 
     - `{session_id}` is alphanumeric, hyphens, dots, or underscores — no spaces
     - `{YYYY-MM-DD HH:MM}` is a plain timestamp — the trailing `(Sydney)` / `(UTC)` / any timezone label INVALIDATES the row (treat the row as a blocker, because the format rule in `.claude/skills/ticket-comment/references/*-template.md` forbids it and rendering it would mean someone copy-pasted from a non-conforming source)
     - `{DB}` is the target database written in that session — exactly one of `RTDB`, `Firestore`, or `RTDB+Firestore` (case-sensitive). The `— {DB}` suffix is REQUIRED; a row missing it (e.g. `- dev: 382 — 2026-05-26 14:50`) is non-conforming
-  - All conditions must hold. A session-id-shaped string in `host: confluence-page` is ALWAYS a blocker. A session-id-shaped string inside `jira-comment` but OUTSIDE the Session deploy block is ALWAYS a blocker. A line inside the Session deploy block that doesn't match the bullet row shape (e.g. a table row `| dev | 382 | 2026-05-26 |`, prose like "session abc-123 was rolled back", or a row missing the required `— {DB}` target-database suffix) is ALWAYS a blocker.
-  - Other L-rules (L1 tool names, L2 AI attribution, L4 local paths, L5 LLM voice, L6 secrets, L8 placeholders) continue to apply inside the Session deploy block — the carve-out is for session identifiers only.
+  - All conditions must hold.
+- **Skip when — Carve-out B (`/create-release-report` Deploy history, per `.claude/rules/output-guardian.md`):**
+  - `host` is `confluence-page` AND the page is a release report (`ticket_key` is `null` and the body's first heading is `Release Report` / `# Release Report —`) — OR the linter is run against a release-report local draft AND
+  - the matched line is a `Deploy history:` block row in the exact shape `- {env} | {session_id}-{action} | {status} | {date}` (optionally followed by a trailing `(scope note)`):
+    - `{env}` is one of `dev` / `uat` / `prod` (lowercase)
+    - `{session_id}` is alphanumeric, hyphens, dots, or underscores — no spaces — prefixed onto the action as `{session_id}-{action}`
+    - `{action}` is one of `apply` / `re-apply` / `revert`
+  - All conditions must hold.
+- **Otherwise a session identifier is a blocker.** A session-id-shaped string in `host: confluence-page` that is NOT a Carve-out B Deploy history row is ALWAYS a blocker. A session-id-shaped string inside `jira-comment` but OUTSIDE the Session deploy block is ALWAYS a blocker. A line inside the Session deploy block that doesn't match the Carve-out A bullet row shape (e.g. a table row `| dev | 382 | 2026-05-26 |`, prose like "session abc-123 was rolled back", or a row missing the required `— {DB}` target-database suffix) is ALWAYS a blocker. Session IDs in release-report PROSE (executive summary, notes, appendix) — not in a Deploy history row — are ALWAYS a blocker.
+- Other L-rules (L1 tool names, L2 AI attribution, L4 local paths, L5 LLM voice, L6 secrets, L8 placeholders) continue to apply inside both carve-out blocks — the carve-outs are for session identifiers only.
 
 ### L4 — Local artifact paths
 

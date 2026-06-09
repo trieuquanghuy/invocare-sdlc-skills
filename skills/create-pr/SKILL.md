@@ -466,28 +466,28 @@ If the branch is already on `origin` (output indicates `Everything up-to-date`),
 
 Read `./references/pr-body-template.md` for the canonical format.
 
-**Title format:** `KMS-{TICKET_KEY}: {short imperative description}`
+**Title format:** `KMS-{TICKET_KEY} | {short imperative description}`
 
-The `KMS-` prefix is the team convention — always present, regardless of ticket project (`GEN`, `FIR`, `IVC`, `PARK`). The separator after the ticket key is `: ` (colon space).
+The `KMS-` prefix is the team convention — always present, regardless of ticket project (`GEN`, `FIR`, `IVC`, `PARK`).
 
 - Build a one-line description from the diff stat:
-  - If 1–3 files changed: name the primary feature area + the verb (e.g. "document two-contact create flow and new client fields")
-  - If many files changed: state the high-level change (e.g. "refactor estimate flow to support partial annotations")
-- Imperative description, no trailing period; no leading Conventional-Commits verb (`feat:` / `fix:`) — the only colon is the one right after the ticket key
+  - If 1–3 files changed: name the primary feature area + the verb (e.g. "Add billedToIds into shouldTerms when searching estimation list")
+  - If many files changed: state the high-level change (e.g. "Refactor estimate flow to support partial annotations")
+- Sentence case (capitalize first word), no trailing period
 - Keep under 100 chars when possible
 
-Example: `KMS-FIR-2034: document two-contact create flow and new client fields`
+Example: `KMS-GEN-2610 | Add billedToIds into shouldTerms when search list Estimation and Invoice`
 
 **Body:**
 
 Default (code-only or no migration plan):
 ```
-TICKET: https://invocarecompass.atlassian.net/browse/{TICKET_KEY}
+Ticket: https://invocarecompass.atlassian.net/browse/{TICKET_KEY}
 ```
 
 With Data Migration plan (config / mixed fix — detect by checking `tickets/{TICKET_KEY}/session-log.md` for any successful Firebase write entry):
 ```
-TICKET: https://invocarecompass.atlassian.net/browse/{TICKET_KEY}
+Ticket: https://invocarecompass.atlassian.net/browse/{TICKET_KEY}
 - [x]  Data Migration plan on UAT: Technical Approach
 ```
 
@@ -614,8 +614,8 @@ Runs **instead of** Steps 0a–7 when the invocation specifies hotfix mode (`hot
 1. **Never push to `main` or `master`.** P2 enforces — if the current branch is the base, refuse.
 2. **Never use `--force`, `--force-with-lease`, or `--no-verify`** unless the user has typed those exact flags in this turn. P13 enforces.
 3. **Never commit secrets.** P6 scans the diff. If matched, stop and surface — never proceed.
-4. **Body MUST start with `TICKET: <jira-url>`** (uppercase `TICKET:`) — team convention from sample PRs.
-5. **Title MUST follow `KMS-{TICKET_KEY}: <description>`** — the `KMS-` prefix is the team convention and the separator after the ticket key is `: ` (colon space); do not omit the prefix.
+4. **Body MUST start with `Ticket: <jira-url>`** — team convention from sample PRs.
+5. **Title MUST follow `KMS-{TICKET_KEY} | <description>`** — the `KMS-` prefix is the team convention; do not omit it and do not substitute `:` for ` | `.
 6. **Reviewers are NOT auto-assigned** — the user picks them in the PR UI manually.
 7. **Code review fixes go in ONE subject-only commit.** Full format, type mapping, absolute prohibitions, and bad examples are in Step 1f. Do not amend the prior commit.
 8. **No automated Jira link-back** — this skill creates the PR only. If the user wants to comment on Jira with the PR URL, they run `/ticket-comment {TICKET_KEY}` separately.
@@ -660,7 +660,7 @@ Runs **instead of** Steps 0a–7 when the invocation specifies hotfix mode (`hot
 | **Push** | No `--force`, no `--no-verify`, no force flags ever | P13, Step 3 |
 | **PR creation** | No `--draft`, no `--auto-merge`, no `--auto` | P19, Step 6 |
 | **PR body** | Must contain Jira URL, must NOT contain `Closes #`, `Fixes #`, `Resolves #` | P7, P15 |
-| **PR title** | Must match `KMS-{TICKET_KEY}: <description>` | P10 |
+| **PR title** | Must match `KMS-{TICKET_KEY} | <description>` | P10 |
 | **Branch lifecycle** | Never delete the branch from this skill | Rule 16 |
 | **Multi-repo** | One PR per repo; with no repo arg, discover candidates and iterate after user confirmation; never aggregate repos into one PR | Rule 15 |
 | **Polluted branches** | Flow C cherry-picks ticket commits onto a clean branch off base; cross-ticket commits warned by P29 (sanity check) | Step 0f / Flow C, P29 |
@@ -702,7 +702,7 @@ A run is complete when every phase below was performed AND the constraint set it
 - [ ] Pre-flight checker ran — verdict captured (PASS / WARN with acknowledged IDs / SKIPPED with reason) (Step 2)
 - [ ] Diff scanned for secret patterns (Rule 3 / P6); no build artifacts / OS files / editor cruft (P28); spec-referenced files cross-checked against diff (P24); no local-only config files staged or in diff (Rule 17 / P20)
 - [ ] Branch pushed with `-u`, no forbidden push flags (Rule 2 / P13); no amended/rebased pushed commits (P25); branch ≤50 commits behind base (P27)
-- [ ] Title = `KMS-{TICKET_KEY}: <description>` (Rule 5 / P10); body starts with the Jira `TICKET:` URL (Rule 4 / P7), migration checkbox only when session-log.md shows config writes, no issue-closing keywords (Rule 10 / P15)
+- [ ] Title = `KMS-{TICKET_KEY} | <description>` (Rule 5 / P10); body starts with the Jira `Ticket:` URL (Rule 4 / P7), migration checkbox only when session-log.md shows config writes, no issue-closing keywords (Rule 10 / P15)
 - [ ] User confirmed title and body before `gh pr create` (Step 5); `gh pr create` ran without `--draft` / `--auto-merge` / `--auto` / `--reviewer` / `--label` unless user opted in (Rule 14 / P19); branch NOT deleted after creation (Rule 16)
 
 **Cross-cutting**
@@ -720,7 +720,7 @@ A run is complete when every phase below was performed AND the constraint set it
 | Including a "Test Plan" section in the body | Team convention is minimal bodies — just the Jira link (and migration checkbox if applicable) |
 | Auto-assigning reviewers | The user assigns manually in the PR UI |
 | Force-pushing to recover from a rebase | Forbidden by P13 — user does this manually if needed |
-| Generating a Conventional Commits-style title (`feat:`, `fix:`) | Team uses `KMS-{TICKET_KEY}: <description>` — no leading verbs before the description |
+| Generating a Conventional Commits-style title (`feat:`, `fix:`) | Team uses `KMS-{TICKET_KEY} | <description>` — no leading verbs |
 | Omitting the `KMS-` prefix from the title | The prefix is mandatory regardless of project (`GEN`, `FIR`, `IVC`, `PARK`) |
 | Posting the PR URL to Jira from this skill | This skill only creates the PR. Run `/ticket-comment {TICKET_KEY}` separately if Jira needs the link |
 | Refusing on a polluted feature branch | Don't refuse — Flow C is the rescue. Cherry-pick ticket commits onto a clean branch off base, stash the rest, push the new branch. |

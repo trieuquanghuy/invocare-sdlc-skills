@@ -9,7 +9,7 @@ Any output must read as if written by a developer — not an AI agent.
 **Never include:**
 - Tool names: `firebase-explorer`, MCP tools, or any Claude/AI tool reference
 - Pipeline / agent / skill names: never name the internal automation that produced the work — no `pipeline`, `pipeline-checker`, `subagent`, `agent`, skill names (`/create-rca`, `/apply-fix`, `/create-pr`, `/ticket-comment`, etc.), or any reference to the workflow that generated the artifact. The reader sees a developer's output, not a description of how it was produced.
-- Session identifiers: Firebase session IDs, run IDs, session numbers (e.g. "Session 124", "Session 127") — see the Carve-out below for the one approved exception
+- Session identifiers: Firebase session IDs, run IDs, session numbers (e.g. "Session 124", "Session 127") — see the two Carve-outs below for the approved exceptions (`/ticket-comment` Session deploy section; `/create-release-report` Deploy history rows)
 - Session-applied entries: lines like "Session 124 applied (AU/NZ At Need templates) — partial, wrong label/format/logic" must never appear in RCA documents, Jira comments, Confluence pages, or any stakeholder-facing file. That detail belongs in `session-log.md` only.
 - Internal workflow language: "queried via", "using tool", "MCP call", "AI investigated", "Claude confirmed"
 - Harness / chat artifacts: literal placeholders the harness injects into a conversation, e.g. `[Image #1]`, `[Image #2]`, `[Image: ...]`, "as shown in the screenshot above", or any token that only makes sense inside a Claude session. These leak the fact that an AI assembled the artifact and mean nothing to the reader. This applies to code comments and commit messages as well as prose (see `.claude/rules/code-comments.md`).
@@ -39,6 +39,25 @@ Session identifiers (the `session_id` returned by `create_session`) MAY appear i
 - Any other host (deploy-result.md prose, RCA documents, status reports, GitHub PR titles / bodies / commit messages, etc.)
 
 A Jira comment that exposes any other piece of internal tooling (tool names, MCP calls, AI attribution, local artifact paths) still fails the linter — the carve-out is for the session-ID line items only.
+
+## Carve-out: `Deploy history` rows in `/create-release-report` pages
+
+Session identifiers (the `session_id` returned by `create_session`) MAY appear in release reports produced by the `/create-release-report` skill — in the LOCAL draft AND on the published Confluence page — but ONLY embedded in a `Deploy history:` block row. The team lead authorized this exception so each release line carries its per-session rollback reference inline. This is the one place session IDs are permitted on a Confluence page.
+
+**The carve-out applies ONLY to:**
+- `host: "confluence-page"` when the page is a release report produced by `/create-release-report` (title `Release Report: {DD MMM YYYY}`), AND the local draft of the same skill
+- Lines that are `Deploy history:` block rows in the exact format `- {env} | {session_id}-{action} | {status} | {date}` (optionally followed by a trailing `(scope note)`). One row per session.
+  - `{env}` is one of `dev` / `uat` / `prod` (lowercase)
+  - `{session_id}` is alphanumeric, hyphens, dots, or underscores — no spaces — prefixed onto the action as `{session_id}-{action}`
+  - `{action}` is one of `apply` / `re-apply` / `revert`
+  - Example row: `- uat | 511-apply | Success | 2026-06-09 (supplier un-archive + 3 SKU tags)`
+
+**The carve-out does NOT apply to:**
+- Prose narration anywhere in the report — session IDs may only appear in the `Deploy history:` block rows, never inline in the executive summary, notes, or appendix.
+- Any other Confluence page (RCA pages, design docs, anything not a `/create-release-report` release report) — session IDs stay forbidden.
+- Any other host (RCA documents, status reports, GitHub PR titles / bodies / commit messages, etc.).
+
+A release report that exposes any other piece of internal tooling (tool names, MCP calls, AI attribution, local artifact paths) still fails the linter — this carve-out is for the `Deploy history` session-ID rows only.
 
 ## Author Identity
 
