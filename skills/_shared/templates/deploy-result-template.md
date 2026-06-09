@@ -9,6 +9,7 @@
 - Author identity is the developer who ran the deploy — never hardcode a person's name and never imply AI involvement.
 - For dry-run: the running log and per-ticket session log are NOT touched. Say so explicitly under Notes.
 - For real runs: include the real `session_id` inside fenced command blocks but keep narrative summary tables free of internal-leakage phrasing.
+- The Session Ledger section lists every session id — apply, re-apply, AND rollback runs — inside a fenced block only, never in the prose tables above. Rollback session ids are listed only when a revert was actually run; otherwise the rollback list reads `none`. For dry-run, the whole ledger reads `n/a — dry-run (no sessions created)`.
 - For dry-run Verification: every row is `🔵 PENDING — real run only`. Never mark a dry-run row PASS or FAIL — plan inconsistencies belong under Notes, not as a Verification verdict.
 - "Code dependency" row only applies for `uat` and `prod` runs. For `dev` runs, drop the row (or mark `n/a — dev is the testbed`).
 
@@ -197,6 +198,30 @@ Each row is a check from the deploy plan's Verification table, run after the wri
 - [ ] [Step 1 — app action with expected outcome]
 - [ ] [Step 2 — app action with expected outcome]
 - [ ] [Step 3 — regression check]
+
+---
+
+## Session Ledger
+
+Every Firebase session created across all runs of this deploy, for tracing and rollback. Session ids live in this fenced block only — never copy them into the prose tables above.
+
+**Write sessions (apply / re-apply):**
+
+```
+[action]    | [env]  | [session_id]          | [YYYY-MM-DD HH:MM] | [RTDB | Firestore | RTDB+Firestore]
+apply       | [ENV]  | [real-session-id]     | [YYYY-MM-DD HH:MM] | [DB]
+```
+
+**Rollback sessions (revert):**
+
+[One row per rollback run. If no rollback has been run, write `none` and drop the fenced block.]
+
+```
+[action]    | [env]  | [rollback-session-id]     | [YYYY-MM-DD HH:MM] | reverted: [apply-session-id]
+revert      | [ENV]  | [real-rollback-session-id]| [YYYY-MM-DD HH:MM] | reverted: [real-apply-session-id]
+```
+
+[Dry-run: the whole ledger reads `n/a — dry-run (no sessions created)`.]
 
 ---
 
