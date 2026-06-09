@@ -17,6 +17,8 @@ Subagents that produce user-visible output without inheriting these rules are no
 
 The dispatch prompt should include both rules in the form: `Apply .claude/rules/output-guardian.md and .claude/rules/secrets-safety.md to all output you produce.`
 
+When the dispatched subagent may **write or modify code**, the dispatch prompt MUST additionally cite `.claude/rules/code-quality.md` so the subagent applies the CQ1–CQ12 standards and self-reviews its diff against them — in the form: `Apply .claude/rules/code-quality.md to all code you write.`
+
 ---
 
 ## A2 — Subagents are read-only by default
