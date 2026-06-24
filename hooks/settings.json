@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Grep|Glob|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/block-confidential.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-lessons-fetched.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Write(*code-review-result.json)",
+            "command": "[ -n \"$SKIP_REVIEW_RENDER\" ] && exit 0; F=$(jq -r '.tool_input.file_path // empty'); [ -n \"$F\" ] && (cd \"$CLAUDE_PROJECT_DIR\" && node .claude/scripts/render-review.js \"$F\") >/dev/null 2>&1 || true"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__code-lesson-kms__list_lessons_for_stack",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/mark-lessons-fetched.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/block-confidential-prompt.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/clear-lessons-sentinel.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
