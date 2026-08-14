@@ -58,7 +58,8 @@ This repo's own rules apply to the edits you make here:
 ```
 rules/                       cross-cutting rules (output-guardian, git-safety, sdlc-gates, code-lessons, …)
                              (the workspace-root CLAUDE.md is generated from these — not a repo file)
-agents/                      checker + reviewer subagents (pipeline-checker.md, pr-reviewer.md)
+agents/                      checker + reviewer subagents (pipeline-checker.md, pr-reviewer.md,
+                             code-review-depth.md, code-review-breadth.md)
 scripts/                     sdlc-gate.sh (layer-2 hook), jira-attachments.sh
 skills/
   _shared/contracts/         checker-contract.md, output-guardian-linter.md, iteration-loop.md
@@ -69,7 +70,7 @@ skills/
   <skill>/SKILL.md           one dir per skill (+ checker-prompt.md / references/ where used)
 ```
 
-Active skills: `apply-fix`, `create-pr`, `create-rca`, `create-spec`, `impact-analysis`, `pr-code-review-fixer`, `prepare-uat`, `publish-rca`, `summarize-firebase-session`, `task-status`, `ticket-comment`.
+Active skills: `apply-fix`, `code-review-kms`, `create-pr`, `create-rca`, `create-spec`, `impact-analysis`, `pr-code-review-fixer`, `prepare-uat`, `publish-rca`, `summarize-firebase-session`, `task-status`, `ticket-comment`.
 
 Conventions:
 - Per-skill templates → `<skill>/references/`; templates used by ≥2 skills → `_shared/templates/`.
