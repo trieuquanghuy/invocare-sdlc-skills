@@ -20,6 +20,7 @@ Every ticket follows the same skill sequence. Each skill produces a named artifa
 | 4 | Apply on DEV | `/apply-fix` | `session-log.md` (run 1) + `deploy-result.md` + Firebase writes OR local code edits | Firebase DEV / Git repo |
 | 5a | Promote (config path) | `/apply-fix` | `session-log.md` (run N+1) + Firebase writes | Firebase UAT, then PROD |
 | 5b | Ship (code path) | `/create-pr`, then `/pr-code-review-fixer` to address PR review comments | GitHub PR on `ivc.ghe.com` | DEV branch, then cherry-pick to UAT |
+| 5c | AI review the PR (2×, both ≥ 7.5) | `/code-review-kms` | review findings + score on the review board | manager-hub review board |
 | 6 | Communicate | `/ticket-comment` | Jira comment body (FULL QA-handoff, or `--short` progress checkpoint) | Jira ticket comment |
 | 7 | Refresh RCA (conditional) | `/publish-rca` | Updated Confluence page | Confluence (KMS2 space) |
 
@@ -82,7 +83,7 @@ flowchart TB
     subgraph P4b ["Phase 4b — Ship code"]
         direction TB
         PR["/create-pr"]:::skill
-        Rev{"AI Review 2×<br/>both ≥ 7.5?"}:::gate
+        Rev{"/code-review-kms<br/>AI Review 2×<br/>both ≥ 7.5?"}:::gate
         MD[("Merged to DEV")]:::doc
         Cp["Cherry-pick to UAT"]:::skill
         Uc{"UAT PR checklist<br/>• Link to ticket<br/>• Data Migration on UAT"}:::gate
@@ -276,7 +277,7 @@ Run `/apply-fix {TICKET_KEY} uat` then `/apply-fix {TICKET_KEY} prod` to promote
 
 - Every pull request targeting **DEV** must go through the AI review workflow, triggered **twice**, before it can be merged.
 - The **acceptable score is 7.5 or higher** on both runs. If either run scores below 7.5, address the feedback and re-run.
-- `/create-pr` runs the lessons-corpus review (`code-lesson` MCP) as Step 1 of the skill — score-threshold enforcement is a manual gate today; verify both runs score ≥ 7.5 before merging.
+- `/create-pr` runs the lessons-corpus review (`code-lesson` MCP) as Step 1 of the skill. **To run the AI review itself, use `/code-review-kms` — see [Step 5c](#step-5c-ai-code-review-on-a-pr) below.** Score-threshold enforcement is a manual gate: verify both runs score ≥ 7.5 before merging.
 - Once merged to DEV, cherry-pick to UAT **without re-running the review**.
 
 ### Addressing review comments
@@ -296,6 +297,90 @@ When opening a UAT PR (cherry-picked from DEV), the PR description must include:
 
 - GitHub Enterprise PR on `ivc.ghe.com` under `FireHawk/<repo>`
 - Commit history references the ticket key (`feat(GEN-XXXX): ...` or `fix(GEN-XXXX): ...`)
+
+---
+
+## Step 5c: AI code review on a PR
+
+Run `/code-review-kms` to drive the AI review on an open PR. This is how the "AI Review 2× · both ≥ 7.5" policy in Step 5b actually gets run.
+
+**Read this section once before your first run.** After that, `/code-review-kms 152` is the whole interface.
+
+### What it does, in one paragraph
+
+It starts a review on the server, hands over your PR's diff, then produces the findings **on your machine** — several reviewer agents run in parallel, each looking at the change through a different lens (correctness, security, performance, and so on). You then work through the findings locally: decide which are real, fix the ones worth fixing, and re-run the reviewers against the fixed code. Only when you're satisfied and have pushed does anything get written back to the server — **exactly once**. Nothing you reject or fix mid-loop ever appears on the review board.
+
+### Before you start
+
+| Need | How to check |
+|---|---|
+| The review server is connected | Type `/mcp`. You should see `code-review-kms` **and** `code-lesson-kms` connected. |
+| Your team token is set | It's an environment variable in your shell. If the review server connected, it's set. It is never printed. |
+| Your PR is pushed | The review reads **committed** code, not your unsaved edits. Anything not pushed is invisible to it. |
+
+Missing one? Say so and stop — a partial run wastes a round on the board.
+
+### Which folder will it use?
+
+Two ways of working, both supported. **You almost certainly want the first.**
+
+- **A plain repo folder** — you `git switch` to the PR branch inside `FCRM-Web/` (or whichever repo) and work there. This is the normal way. Nothing to set up.
+- **A separate folder per ticket** (a "worktree") — some of us keep the main repo folder untouched and check each ticket out into its own directory. If you've never done this deliberately, you're not doing it.
+
+You don't have to declare which. The skill checks and tells you. It only asks if it genuinely can't tell — usually because the PR branch isn't checked out yet, and the fix is one `git switch`.
+
+Two things it will do in a plain repo folder that it skips in a worktree: it confirms you're on the right branch, and it lists any files you'd already modified **before** the review started. That second one matters — once fixes start landing, that list is the only way to tell your pre-existing work from the review's changes.
+
+### Running it
+
+```
+/code-review-kms 152
+```
+
+Pass the PR number. Add the folder path, branch, or base branch only if it asks.
+
+**What it will do:** ask you to approve at three points (below), edit files locally once you approve, and give you a `git add` line at the end.
+
+**What it will never do:** commit, push, or merge. Not once, not "to finish the job." That's yours — every time.
+
+### The three stopping points
+
+You'll be asked three times. Each is a real decision, not a confirmation click.
+
+**1 · Which findings are real?**
+You get every finding sorted into: fix now · fix later · not valid · out of scope. Your job is to check the sorting — the reviewers are good but not right about everything, and a finding about code this PR didn't touch is out of scope no matter how correct it is.
+*Approving means:* nothing leaves your machine. The findings are still just a file on disk.
+
+**2 · Which fixes get applied?**
+You see the specific edits proposed for this pass.
+*Approving means:* files change in your folder. Still no commit, still nothing on the server. Then the reviewers run again on the fixed code — so a fix that introduces a new problem gets caught on the next pass.
+
+**3 · Ready to push?**
+The loop has settled and nothing high-severity is left in "fix now".
+*Approving means:* you push, then the result is submitted to the server — the one and only write for this round.
+
+**When are you done?** When there are no **fix now** high or critical findings left. "Fix later" ones stay open on purpose and don't block you. Don't aim at the score — it's calculated from the findings, so fixing what's real moves it on its own. Aiming at the number instead is how you end up gaming a round rather than improving the code.
+
+### Finishing up
+
+The skill hands you something like:
+
+```
+git add src/app/foo.component.ts src/app/bar.service.ts
+git commit -m "fix(GEN-1234): handle null client on estimate load"
+git push
+```
+
+Run those yourself. **Use the exact file list it gives you** — never `git add .`. The review leaves working files behind (`review-artifacts/`, `local-diff.patch`, a few JSON files) and none of them belong in your commit. In a plain repo folder they sit right alongside your real work, so this matters more than it looks. Adding them to `.gitignore` once saves you the worry.
+
+### When something goes wrong
+
+| Symptom | What's happening | Do this |
+|---|---|---|
+| Skill says the review server isn't connected | The MCP server isn't running or configured | `/mcp` to check; ask the maintainer for the config if it's absent |
+| Findings about files you never touched | The PR was opened against the **wrong base branch**, so the diff includes other people's commits | Fix the base on the PR. Don't reject the findings one by one — they'll come back next round |
+| A tool fails instantly, with an error about invalid parameters | A dropped connection, not a bad request. The giveaway is that it failed in **under a second** — a real rejection takes a network round-trip | `/mcp`, reconnect, re-issue the **identical** call. Don't rewrite the arguments |
+| You accidentally staged a review artifact | Easy to do in a plain repo folder | `git restore --staged <file>` before committing |
 
 ---
 
@@ -336,6 +421,7 @@ Triggers on: `prepare uat`, `deploy uat`, `build deploy.md from comment`, `gener
 
 | Skill | When to use |
 |---|---|
+| `/code-review-kms {PR}` | Run the AI review on an open PR — drives it end-to-end, stops at three approval points, never commits or pushes for you. See Step 5c |
 | `/impact-analysis {KEY}` | Before writing a technical approach — read-only blast-radius map of the code + config a ticket will touch ("what does this touch?", "is this plan safe?") |
 | `/task-status {KEY}` | Daily standup, return-after-time-away, "where am I on GEN-XXXX?" |
 | `/task-status all` | Overview across every open ticket folder |
