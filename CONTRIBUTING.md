@@ -60,15 +60,26 @@ Before opening a pull request:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/sync/tests -p 'test_*.py'
-bash -n tools/sync/*.sh
+while IFS= read -r file; do
+  bash -n "$file"
+done < <(find hooks scripts tools/sync -type f -name '*.sh' | sort)
 git diff --check
 git status --short
 ```
 
-## CI and release expectations
+## Local validation and manual releases
 
-All Python tests run via discovery. The command above is the authoritative local equivalent of CI.
+This repository has no CI/CD runner. Contributors must run the validation commands above locally before opening or updating a pull request.
 
-The release workflow validates that a tag follows the immutable `vYYYY.MM.DD` CalVer format before publishing. Do not create tags manually; the workflow enforces the format and publishes the tag atomically.
+Maintainers publish immutable CalVer tags manually after reviewing the pull request and repeating the local validation:
+
+```bash
+TAG=v2026.08.22
+bash scripts/validate-calver.sh "$TAG"
+git tag -a "$TAG" -m "Release $TAG"
+git push origin "$TAG"
+```
+
+Never move or reuse a published tag.
 
 For repository ownership and layout, start with [`README.md`](README.md); implementation-specific rules remain in `rules/` and each skill's `SKILL.md`.

@@ -59,7 +59,9 @@ Run from the repository root:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/sync/tests -p 'test_*.py'
-bash -n tools/sync/*.sh
+while IFS= read -r file; do
+  bash -n "$file"
+done < <(find hooks scripts tools/sync -type f -name '*.sh' | sort)
 git diff --check
 ```
 

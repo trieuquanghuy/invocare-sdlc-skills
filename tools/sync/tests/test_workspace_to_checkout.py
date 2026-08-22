@@ -65,6 +65,15 @@ class WorkspaceToCheckoutTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("nothing to sync", result.stderr)
 
+    def test_dry_run_reports_mode_without_flag_suffix(self):
+        (self.workspace / ".claude/skills").mkdir(parents=True)
+
+        result = self._run("--dry-run")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Mode:      DRY-RUN (no changes written)\n", result.stdout)
+        self.assertNotIn("DRY-RUN (no changes written)--dry-run", result.stdout)
+
     # --- Hook reverse-mapping tests ---
 
     def test_dot_claude_hooks_map_back_to_repo_hooks_hooks(self):

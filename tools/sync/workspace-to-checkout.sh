@@ -91,7 +91,9 @@ EXC=(
 echo "Sync:      .claude -> clone (one way)"
 echo "Clone:     $CLONE"
 echo "Workspace: $CLAUDE"
-echo "Mode:      ${DRY:+DRY-RUN (no changes written)}${DRY:-apply}"
+MODE_LABEL="apply"
+[ -n "$DRY" ] && MODE_LABEL="DRY-RUN (no changes written)"
+echo "Mode:      $MODE_LABEL"
 echo
 
 [ -d "$CLAUDE" ] || {

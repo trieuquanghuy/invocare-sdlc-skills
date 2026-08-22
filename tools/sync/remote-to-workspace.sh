@@ -66,7 +66,9 @@ trap 'rm -rf "$TMP"' EXIT
 
 echo "Repo:      $OWNER_REPO @ $REF (public)"
 echo "Workspace: $WS"
-echo "Mode:      ${DRY:+DRY-RUN (no changes written)}${DRY:-apply}"
+MODE_LABEL="apply"
+[ -n "$DRY" ] && MODE_LABEL="DRY-RUN (no changes written)"
+echo "Mode:      $MODE_LABEL"
 echo
 
 # 0. Up-to-date check. Resolve the ref's latest commit SHA (cheap — no tarball) and compare
@@ -182,25 +184,51 @@ for _hsrc in "$HOOK_SCRIPTS_SRC" "$HOOK_SETTINGS_SRC"; do
 done
 
 echo "Updating $WS/.claude/ …"
+# In dry-run mode, GNU rsync (Linux) exits with code 3 when the destination
+# directory does not yet exist.  Shadow nonexistent destinations to a temporary
+# directory so --dry-run can still traverse and report what would change without
+# touching the workspace.  When the real destination already exists we compare
+# against it directly, keeping update-reporting accurate.
+_dry_dest() {
+  local real="$1" shadow_name="$2"
+  if [ -n "$DRY" ] && [ ! -d "$real" ]; then
+    local sd="$TMP/$shadow_name"
+    mkdir -p "$sd"
+    printf '%s' "$sd/"
+  else
+    printf '%s' "$real/"
+  fi
+}
+CLAUDE_DEST="$(_dry_dest "$WS/.claude" "shadow-claude")"
 RAW="$(rsync -ac --itemize-changes $DRY \
   --backup --backup-dir="$BK" \
   --exclude 'skills/_local/***' \
-  "${SRCS[@]}" "$WS/.claude/")"
+  "${SRCS[@]}" "$CLAUDE_DEST")"
 # 2b. Install hooks with explicit mapping (hooks/ layout differs from .claude/ layout).
 #     hooks/hooks/* → .claude/hooks/*  (scripts land flat, not nested)
 #     hooks/settings.json → .claude/hooks/settings.json  (reference fragment; never settings.local.json)
 [ -n "$DRY" ] || mkdir -p "$WS/.claude/hooks"
 HOOK_RAW=""
 if [ -d "$HOOK_SCRIPTS_SRC" ]; then
+  HOOKS_DEST="$(_dry_dest "$WS/.claude/hooks" "shadow-hooks")"
   HOOK_RAW="$(rsync -ac --itemize-changes $DRY \
     --backup --backup-dir="$BK" \
-    "$HOOK_SCRIPTS_SRC/" "$WS/.claude/hooks/")"
+    "$HOOK_SCRIPTS_SRC/" "$HOOKS_DEST")"
 fi
 HOOK_SETTINGS_RAW=""
 if [ -f "$HOOK_SETTINGS_SRC" ]; then
-  HOOK_SETTINGS_RAW="$(rsync -ac --itemize-changes $DRY \
-    --backup --backup-dir="$BK" \
-    "$HOOK_SETTINGS_SRC" "$WS/.claude/hooks/settings.json")"
+  if [ -n "$DRY" ] && [ ! -d "$WS/.claude/hooks" ]; then
+    # shadow-hooks may not have been created yet if HOOK_SCRIPTS_SRC was absent.
+    mkdir -p "$TMP/shadow-hooks"
+    _settings_shadow="$TMP/shadow-hooks/settings.json"
+    HOOK_SETTINGS_RAW="$(rsync -ac --itemize-changes $DRY \
+      --backup --backup-dir="$BK" \
+      "$HOOK_SETTINGS_SRC" "$_settings_shadow")"
+  else
+    HOOK_SETTINGS_RAW="$(rsync -ac --itemize-changes $DRY \
+      --backup --backup-dir="$BK" \
+      "$HOOK_SETTINGS_SRC" "$WS/.claude/hooks/settings.json")"
+  fi
 fi
 # Show only real content changes — new files (code has +++++++) and updated files (>f…) —
 # labelled new / updated; drop directories and metadata-only churn (mtime/perms) that's just noise.

@@ -70,6 +70,110 @@ class RepoToClaudeTest(unittest.TestCase):
         self.assertFalse((workspace / ".claude").exists())
         self.assertFalse((workspace / ".mcp.json.example").exists())
 
+    def test_dry_run_reports_mode_without_flag_suffix(self):
+        workspace = self.root / "dry-run-mode-workspace"
+        workspace.mkdir()
+
+        result = self._run(workspace, "--dry-run")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Mode:      DRY-RUN (no changes written)\n", result.stdout)
+        self.assertNotIn("DRY-RUN (no changes written)--dry-run", result.stdout)
+
+    # --- GNU rsync regression: dry-run hook destination must not need to exist ---
+
+    def _run_with_gnu_rsync_guard(self, workspace, *args):
+        """Run the installer with a wrapper that emulates GNU rsync's strict
+        destination-existence check for --dry-run calls.
+
+        GNU rsync exits with code 3 when the destination of a --dry-run transfer
+        does not exist as a directory (trailing-slash source pattern).  macOS rsync
+        is lenient and silently succeeds.  The wrapper delegates to the real rsync
+        for all other invocations so we still exercise real rsync behaviour.
+        """
+        # Resolve the real rsync binary path NOW (before the wrapper shadows it).
+        import shutil
+        real_rsync = shutil.which("rsync") or "/usr/bin/rsync"
+        wrapper_body = (
+            '#!/usr/bin/env bash\n'
+            'set -euo pipefail\n'
+            '# Capture all args into an array so we can inspect them safely.\n'
+            'args=("$@")\n'
+            'dry=0\n'
+            'for a in "${args[@]}"; do\n'
+            '  [ "$a" = "--dry-run" ] && dry=1\n'
+            'done\n'
+            '# GNU rsync requires the destination DIRECTORY to already exist in dry-run\n'
+            '# when the destination arg ends with / (directory-target pattern).\n'
+            '# When the destination does not end with / rsync treats it as a file copy\n'
+            '# and does not require the parent directory to exist.\n'
+            'dest=""\n'
+            'for a in "${args[@]}"; do\n'
+            '  case "$a" in --*) ;; *) dest="$a" ;; esac\n'
+            'done\n'
+            'if [ "$dry" -eq 1 ]; then\n'
+            '  case "$dest" in\n'
+            '    */)\n'
+            '      dest_clean="${dest%/}"\n'
+            '      if [ -n "$dest_clean" ] && [ ! -d "$dest_clean" ]; then\n'
+            '        printf "rsync: [receiver] mkdir \\"%s\\" failed: No such file or directory (2)\\n" "$dest_clean" >&2\n'
+            '        echo "rsync error: error in file IO (code 11) at receiver.c(819) [receiver=3.x]" >&2\n'
+            '        exit 3\n'
+            '      fi\n'
+            '    ;;\n'
+            '  esac\n'
+            'fi\n'
+            f'exec "{real_rsync}" "$@"\n'
+        )
+        # Write a temporary rsync wrapper that shadows the system rsync for this run only.
+        gnu_bin = self.root / "gnu-bin"
+        gnu_bin.mkdir(exist_ok=True)
+        rsync_wrapper = gnu_bin / "rsync"
+        rsync_wrapper.write_text(wrapper_body)
+        rsync_wrapper.chmod(0o755)
+        env = dict(self.env)
+        env["PATH"] = f"{gnu_bin}:{env['PATH']}"
+        return subprocess.run(
+            [str(SCRIPT), str(workspace), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+
+    def test_dry_run_fresh_workspace_succeeds_under_gnu_rsync(self):
+        """Dry-run on a fresh workspace must not fail with code 3 on GNU rsync.
+
+        GNU rsync exits code 3 when a trailing-slash-source rsync targets a
+        nonexistent destination directory.  The fix must redirect the hook rsync
+        to a shadow dir under $TMP so the real destination is never required.
+        """
+        workspace = self.root / "gnu-dry-run-fresh"
+        workspace.mkdir()
+
+        result = self._run_with_gnu_rsync_guard(workspace, "--dry-run")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((workspace / ".claude").exists(),
+                         "dry-run must not create .claude in the workspace")
+        self.assertFalse((workspace / ".mcp.json.example").exists())
+
+    def test_dry_run_claude_present_hooks_absent_succeeds_under_gnu_rsync(self):
+        """Dry-run with .claude/ present but .claude/hooks/ absent must also succeed.
+
+        This exercises the case where a workspace already has .claude/ (e.g. a
+        partial install) but .claude/hooks/ has not been created yet.
+        """
+        workspace = self.root / "gnu-dry-run-partial"
+        workspace.mkdir()
+        (workspace / ".claude").mkdir()
+
+        result = self._run_with_gnu_rsync_guard(workspace, "--dry-run")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((workspace / ".claude/hooks").exists(),
+                         "dry-run must not create .claude/hooks")
+
     def test_apply_installs_configuration_examples_at_target_levels(self):
         workspace = self.root / "apply-workspace"
         workspace.mkdir()
