@@ -1,3 +1,5 @@
+> **Brevity rule (author instruction — never include this block in the posted comment):** this comment is read by QA/BA skimming Jira. Include a table row, bullet, or sentence only when it tells the reader something actionable — omit filler rows, don't restate the same fact across sections, and keep prose to the template's stated length. A shorter comment that says everything real beats a complete-looking one padded to fill the template.
+
 ## 1. Before the Fix
 
 **Correct requirement:**
@@ -17,19 +19,14 @@ RCA: [{RCA page title}]({confluence_url})
 
 | # | Element/File | ID/Path | Change |
 |---|-------------|---------|--------|
-| 1 | {name}      | {id}    | {what changed} |
+| 1 | {name}      | {id}    | {what changed — for config: before → after values, e.g. `filename: foo.pdf` → `bar.pdf`} |
 
 - {Bullet: additional changes not in table, e.g., RTDB cleanup, field reindexing}
 
 {If fix deviated from RCA recommendation, add:}
 **Deviation from RCA:** {what RCA recommended vs what was actually done, and why}
 
-## 3. Expected Result
-
-{Brief description of what the system should now do after the fix is applied}
-{What the user/admin will see — concrete, testable outcomes}
-
-## 4. Impact Area
+## 3. Impact Area
 
 > **QA** — areas to regression-test beyond the specific fix.
 > **BA** — business workflows or pages affected by this change.
@@ -38,19 +35,6 @@ RCA: [{RCA page title}]({confluence_url})
 |------|--------|-------------------|-----------------|
 | {feature / page / module — e.g. "Death Certificate export"} | Direct fix | {specific thing to test} | {business workflow affected} |
 | {adjacent feature — e.g. "Funeral form — Page 3"} | Regression risk | {what to verify is unchanged} | {why BA should be aware} |
-| {unrelated area that shares the same config path or code} | May be affected | {spot check} | {low risk, but confirm with BA if unsure} |
-
-## 5. Verification
-
-**Dev:** Config confirmed in place as of {date}. {For code-only: commit {sha} deployed to dev.}
-
-**QA Test Scenarios:**
-
-| # | Scenario | Steps | Expected Result |
-|---|----------|-------|-----------------|
-| 1 | {scenario name} | {what QA should do step by step} | {what they should see} |
-| 2 | {scenario name} | {steps} | {expected} |
-| N | {regression check} | {steps} | {no regression — existing behavior unchanged} |
 
 ---
 
@@ -122,13 +106,7 @@ RCA: [{RCA page title}]({confluence_url})
 
 ---
 
-## 6. Not Addressed
-
-| # | Item | Location | Reason | Follow-up |
-|---|------|----------|--------|-----------|
-| 1 | {what wasn't done} | {e.g., Page 3} | {why — separate concern, blocked, data unavailable} | {action — deferred to TICKET-KEY, will address in next sprint, needs BA clarification, etc.} |
-
-## 7. Session Deploy
+## 4. Session Deploy
 
 **Session deploy**
 - dev: 382 — 2026-05-26 14:50 — RTDB

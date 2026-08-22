@@ -128,7 +128,7 @@ cc: @jordan.lee, @Brendan Trestrail, BA / PM / QA
 - Impact Area table, QA test scenarios, regression checks
 - BA "what to know" or "what to check" cells
 - UAT Deployment block (config-only / code-only / mixed) — that's a full-template concern
-- Not Addressed table
+- Deferred-item notes (full-template concern)
 - Verification commands, code snippets, paths
 - Anything that looks like a deploy plan
 

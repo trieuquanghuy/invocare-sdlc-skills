@@ -1,5 +1,7 @@
 # create-pr Prep Flows — Operator Reference
 
+> **Maintainer documentation — not read at runtime.** The per-flow operation blocks are inlined in SKILL.md Step 0f.3; the runtime consults this file only for the conflict-gate prompts when a stash-pop or cherry-pick conflict actually occurs.
+
 A maintainer's reference for the prep states `create-pr` recognizes. This file is NOT shown to operators — they see prompts and refuse messages from `SKILL.md` directly. Read this when:
 
 - You're maintaining the skill and need a quick refresh of the state machine

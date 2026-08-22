@@ -12,9 +12,13 @@ Generate fix artifacts from an existing RCA. Produces two files under `tickets/{
 | File | Template | When |
 |------|----------|------|
 | `spec.md` | [spec-template.md](./references/spec-template.md) | Always |
-| `validation.md` | [validation-template.md](./references/validation-template.md) | Always |
+| `validation.md` | [validation-template.md](../create-validation/references/validation-template.md) — owned by `create-validation` | Always |
 
 `spec.md` is the single source of truth — it includes RCA summary, technical approach, deployment steps, and rollback. Another developer (or Claude in a new session) can deploy from `spec.md` alone without opening `rca.md`.
+
+**Focus:** the spec answers *how we fix it* — concretely, as **before state → after state** (exact paths/values/code), plus the executable steps to get there and back (rollback). Re-analyzing the issue belongs in rca.md (one-paragraph summary here is enough); QA communication belongs in the comment.
+
+**Revision semantics — update in place, never accumulate.** When the approach changes (new finding, previous fix didn't hold): rewrite the affected sections — new before/after, new steps — so the spec reads as the current plan. Do NOT keep the abandoned approach alongside the new one, append "v2"/"Correction" blocks, or narrate what changed; if the old approach was partially applied, that fact lives in `session-log.md` and the Rollback section, not as historical prose. A revised spec should read as if written correctly the first time.
 
 Read the relevant template before writing each file. Replace every `[PLACEHOLDER]` with real data. Remove the `## IMPORTANT RULES` block — it is agent instruction, not output content.
 
@@ -31,7 +35,7 @@ Read the relevant template before writing each file. Replace every `[PLACEHOLDER
 - `tickets/{TICKET_KEY}/rca.md` is missing → run `/create-rca` first.
 - `rca.md` has a `## Open Questions` section → resolve the questions and re-run `/create-rca` before generating a spec.
 - User wants to apply a fix that already has a `spec.md` → use `/apply-fix`.
-- User wants the architecture or blast radius of a feature with no ticket attached → use `/impact-analysis`.
+- User wants the architecture or blast radius of a feature with no ticket attached → answer directly with reposphere (`graph_query` callers, `cross_repo_search`).
 
 ---
 
@@ -79,11 +83,9 @@ Key rules:
 - Rollback goes inline in spec.md (not a separate rollback.md)
 - For code sections: run `search_with_context({query: "symbolName", repo: "..."})` to confirm callers and capture blast radius in one call — include the callers summary. Then read the actual file and paste exact current code.
 
-## Step 3: Write validation.md
+## Step 3: Write validation.md — via create-validation
 
-Read [validation-template.md](./references/validation-template.md).
-
-Minimum: 1 happy path + 1 edge case + 1 regression check. Use real entity IDs from the rca.md evidence section — they were already captured during investigation.
+Follow `.claude/skills/create-validation/SKILL.md` (do not dispatch a subagent — apply its workflow inline in this run, using the spec.md draft already in memory as input). It owns the validation-template, the Coverage table (every AC / bug symptom mapped to a scenario or NOT COVERED with a reason), and the minimal-scenario rules. Use real entity IDs from the rca.md evidence section — they were already captured during investigation.
 
 ## Step 3b: Self-check the Quality Bar
 
@@ -157,7 +159,7 @@ Print the Next-step footer matching `final_classification`.
 - [ ] Write steps with ENV_SPECIFIC paths are annotated with `⚠️ ENV_SPECIFIC: resolve ...`
 - [ ] `spec.md` dry-run queries match rca.md evidence paths
 - [ ] `spec.md` uses `query_rtdb`/`query_firestore` and `write_rtdb`/`write_firestore` matching the DB type per path — no `[PLACEHOLDER]` data
-- [ ] `spec.md` Rollback section has both Option A (session rollback) and Option B (manual fallback)
+- [ ] `spec.md` Rollback section has Option A (session rollback) with verify query; Option B (manual fallback) may be the compact recipe note or omitted per the template’s omit-empty rule
 - [ ] `validation.md` has happy path + edge case + regression; entity IDs from rca.md evidence
 - [ ] No invented Firebase paths or placeholder data in any output file
 

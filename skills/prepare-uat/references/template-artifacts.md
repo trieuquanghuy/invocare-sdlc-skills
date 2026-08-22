@@ -26,9 +26,15 @@ Candidate: "{Name}"
 
 If a mention is ambiguous (e.g. the page says `document-templates/` without a specific subfolder, or names a template loosely like "the new slideshow template"), stop and ask the user. **Never guess.**
 
-## Step 4.5b — Verify local files exist
+## Step 4.5b — Verify local files exist and capture integrity in ONE Bash call
 
-For each candidate, check that BOTH files exist under `document-templates/{Name}/`:
+Run a single bundled command over all candidate folders — it folds the existence check, sha256, byte size, and 10-line excerpt for every `.twig`/`.css` into one call (missing files are visibly absent from the output):
+
+```bash
+for f in document-templates/{Name1,Name2}/*.{twig,css}; do [ -f "$f" ] && printf '%s | %s | %s bytes | excerpt:\n%s\n---\n' "$f" "$(shasum -a 256 "$f" | cut -d' ' -f1)" "$(wc -c < "$f" | tr -d ' ')" "$(grep -v '^[[:space:]]*$' "$f" | head -10)"; done
+```
+
+Substitute the real candidate folder names into the brace list. Then apply the existence rules per candidate:
 
 | Situation | Behaviour |
 |---|---|
@@ -38,16 +44,9 @@ For each candidate, check that BOTH files exist under `document-templates/{Name}
 | Only `.css` (no `.twig`) | Stop unconditionally. Report `Template "{Name}" has a .css but no .twig — cannot proceed without the template body. Confirm the source on Confluence.` and exit Step 4.5. |
 | Neither file present | Stop. Report `Template "{Name}" referenced in Confluence but document-templates/{Name}/ does not exist in the local repo. Sync the repo or correct the name before re-running.` |
 
-## Step 4.5c — Compute sha256 and byte size
+## Step 4.5c — Record sha256 and byte size
 
-For each candidate that survived 4.5b, capture for every file present:
-
-```
-sha256: <hex digest>
-size:   <bytes, formatted as KB / MB>
-```
-
-Use `shasum -a 256 {path}` (or equivalent). The full 64-char hex digest is the authoritative integrity hash the protocol's full-sha256 block carries. Truncate to 4+4 characters only for the readable table.
+The 4.5b one-liner already emitted the hash, size, and excerpt for every present file — no per-file `shasum` calls needed. Record them per candidate. The full 64-char hex digest is the authoritative integrity hash the protocol's full-sha256 block carries. Truncate to 4+4 characters only for the readable table.
 
 ## Step 4.5d — Classify each template
 

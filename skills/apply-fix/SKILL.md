@@ -17,6 +17,8 @@ This skill is the canonical apply path.
 
 **Agent safety:** apply `.claude/rules/agents-safety.md` — the pre-flight checker subagent (Step 2) is read-only, returns structured JSON, escalates failures.
 
+**Local dev overrides:** apply `.claude/rules/local-dev-overrides.md` — pre-existing run-local config modifications are expected noise, never staged, reverted, or counted as part of the fix diff (enforced by CR3 and the code-fix flow).
+
 ## NOT This Skill If
 
 - User hasn't generated a `spec.md` or `deploy.md` yet → use `/create-spec` first.
@@ -33,6 +35,10 @@ This skill is the canonical apply path.
 ## Step 1: Locate and Read the File
 
 The file may be anywhere — `tickets/GEN-XXXX/deploy.md`, `~/Downloads/fix-script.md`, `~/Desktop/GEN-2759-deploy.md`, or any path the user provides.
+
+**Step 1.0: Validate the environment argument (both modes, before anything else)**
+
+Call `list_environments` and check the env argument against the returned list. Unknown env → fail immediately: `Unknown environment '{ARG}'. Valid environments: {list}.` Do not locate files, dispatch pre-flight, or do any other work first — a typo'd env caught here costs nothing; caught at write time it costs a session.
 
 **Step 1a: Identify the ticket key**
 
@@ -64,9 +70,15 @@ Resolve the deploy file in this order (the `prepare-uat` skill writes an env-spe
 
 If both `{TICKET_KEY}-deploy-uat.md` AND `deploy.md` exist and target env is `uat`, prefer the env-specific file and tell the user: `Using {TICKET_KEY}-deploy-uat.md (env-specific) — deploy.md is also present but ignored for this run.` Never silently merge them.
 
+**Env-file gate for promotion:** if the target env is `uat` or `prod` AND the resolved execution source is a plain `deploy.md` (or any file whose `create_session` / write calls hardcode a *different* `environment_name` than the target), STOP:
+
+> This plan targets {other env}. Run /prepare-uat {TICKET_KEY} first, or type `use dev plan on {env}` to override.
+
+Only the exact typed override phrase proceeds; a plain `yes` does not. Record the override in Step 4d's session-log entry (`Env-file gate: overridden by user`).
+
 | Available | Action |
 |-----------|--------|
-| `spec.md` + `deploy.md` (or `{TICKET_KEY}-deploy-uat.md`) | Read spec.md for context, follow the deploy file for execution |
+| `spec.md` + `deploy.md` (or `{TICKET_KEY}-deploy-uat.md`) | Don't read spec.md in full — grep it for `## Code Changes`, `Code change (out of scope`, and fix-type/env headers, and read only those sections; follow the deploy file for execution. (Full spec.md read only when spec.md is the execution source.) |
 | Deploy file only | Read it directly — it is the execution source |
 | `spec.md` only | Read spec.md — follow Execution section for config writes, Code Changes section for code |
 | Non-standard filename | Read it, copy to the standard name under `tickets/{TICKET_KEY}/` (`{TICKET_KEY}-deploy-uat.md` for env=uat, `deploy.md` otherwise) |
@@ -88,14 +100,13 @@ Detect `--dry-run` in `$ARGUMENTS`:
 
 Before any writes or edits, validate inputs by dispatching the pre-flight checker subagent.
 
-1. Read `./checker-prompt.md` from this skill folder.
-2. Dispatch a `pipeline-checker` subagent (`.claude/agents/pipeline-checker.md`) with:
-   - The full prompt from `checker-prompt.md`
+1. Dispatch a `pipeline-checker` subagent (`.claude/agents/pipeline-checker.md`) with:
+   - A self-contained prompt that inlines the full rubric from `.claude/skills/apply-fix/checker-prompt.md`, the task description, and every input required to evaluate it. A file-path reference alone is not sufficient.
    - Ticket key (from Step 1a)
    - Target env (from the `/apply-fix` arg)
    - Paths: `tickets/{TICKET_KEY}/rca.md` (if exists), `tickets/{TICKET_KEY}/spec.md` (if exists), the deploy file resolved in Step 1c (`{TICKET_KEY}-deploy-uat.md` for env=uat, otherwise `deploy.md`), `tickets/{TICKET_KEY}/session-log.md` (if exists)
-3. Parse the JSON result block from the subagent's reply per `.claude/skills/_shared/contracts/checker-contract.md`: `{ verdict, ticket_key, target_env, summary, iteration_hint, gaps[] }`.
-4. Partition `gaps[]` by severity. Branch on verdict:
+2. Parse the JSON result block from the subagent's reply per `.claude/skills/_shared/contracts/checker-contract.md`: `{ verdict, ticket_key, target_env, summary, iteration_hint, gaps[] }`.
+3. Partition `gaps[]` by severity. Branch on verdict:
    - **FAIL** → print every gap with `severity: blocker` as shown below, exit. No `create_session` call. No writes happen.
    - **WARN** → print every gap with `severity: warning`, ask `Proceed anyway? (yes/no)`. If `no` → exit. If `yes` → record acknowledged warning rule IDs (e.g. `R7, R8`) for Step 4d's session-log entry, continue.
    - **PASS** → print `severity: info` gaps (if any), continue silently otherwise.
@@ -128,6 +139,13 @@ If `no` → stop. Do not proceed until code deploys are confirmed.
 
 For `dev` runs this step is skipped — dev is the testbed; nothing else is expected live there.
 
+**Code/config ordering (mixed fixes, ALL envs including dev):** read the spec for an ordering note (e.g. "code must be live before the config flip", or the reverse). If one is present, honor it:
+
+- **Code-first:** run Step 5 before Step 4, OR require the user to type `code is merged and deployed on {ENV}` (confirming the code change is merged AND deployed on the target env — dev included) before any config write.
+- **Config-first:** run Step 4 before Step 5 as usual, and surface the note so the user knows code must follow immediately.
+
+If the spec has no ordering note, the default order (Step 4 then Step 5) stands.
+
 **Step 3b: Summary confirmation**
 
 Summarize what you're about to do:
@@ -138,6 +156,7 @@ About to apply fix for {TICKET_KEY}:
 - Environment: {dev | uat | prod}
 - Mode: {REAL | DRY-RUN}
 - {N} Firebase writes / {N} code files to change
+- This plan has {N} writes — expect {N} approval prompts
 - Code dependencies confirmed live: {yes | n/a — dev}
 
 Proceed? (yes / no)
@@ -146,6 +165,31 @@ Proceed? (yes / no)
 Wait for explicit confirmation. If the fix targets **production** AND mode is `REAL`, add a prominent warning:
 
 > ⚠️ **PRODUCTION FIX** — this will modify live data. Confirm: yes
+
+**Prod dry-run-first gate:** if target env is `prod` AND mode is `REAL` AND `tickets/{TICKET_KEY}/deploy-result.md` contains no prior prod `DRY-RUN` run block, do not proceed on a plain `yes`. Either switch this run to dry-run, or require the user to type the exact phrase `prod real without dry-run`. Record the override in Step 4d's session-log entry.
+
+**Step 3c: Live-state reconciliation (both modes, before create_session)**
+
+Batch-read EVERY path the plan writes — one parallel turn of `query_rtdb` / `query_firestore` against the target env — and diff each against the plan's `Before:` state (Format A verbatim / Format B hash, per Step 4b.ii conventions). Then present ALL mismatches at once, not write-by-write:
+
+```
+Live-state reconciliation on {ENV}: {N} of {TOTAL} planned writes have stale Before snapshots.
+
+1. {path} — {field}: plan Before = a, current = b
+   → proceed / drop / abort?
+2. ...
+```
+
+Per mismatch the user chooses:
+- `proceed` — the plan's Before is stale but the change is still correct; the fresh read becomes the in-memory Before snapshot.
+- `drop` — remove that write from this run; mark `⚠️ skipped (reconciliation)` in Step 4f.
+- `abort` — the spec needs revision; stop the run entirely (no session exists yet, so nothing to close — just report).
+
+Only after reconciliation completes does Step 4a's `create_session` run. This step is what prevents discovering a stale spec write-by-write inside an open session. The per-write drift prompts in 4b.ii stay — after a clean reconciliation they're a fast no-op recheck that catches races between reconciliation and the write.
+
+**Re-apply rounds (Run N > 1) use this step to carry forward what earlier runs learned:**
+- If a path's live value already equals the write's TARGET value, auto-propose that write as `drop — already applied (Run {M})` in the reconciliation list; the user confirms rather than re-approving a no-op write.
+- If `tickets/{TICKET_KEY}/notes/*-apply-findings.md` contains entries not acknowledged in `session-log.md`, STOP before reconciliation: print each unread finding's first line and require the user to acknowledge (the findings exist because a previous run hit something the plan didn't predict — re-running blind repeats it).
 
 ## Step 4: Config Fix — Execute Firebase Writes
 
@@ -171,9 +215,32 @@ Pre-write reads (4b.i) and the per-write preview + approval (4b.iii) run in BOTH
 
 > **Run-mode gating:** Sub-steps 4a, 4a.5, 4c, and 4d are **REAL-mode only**. On dry-run, skip them — never create a session, never call `write_*`, never touch `sessions/running-log.md` or `tickets/{TICKET_KEY}/session-log.md`. Pre-flight reads (4b's drift check) and the per-write display + approval are always run; they're how the dry-run gathers material for Step 4f's report.
 
+### Mid-loop exit protocol
+
+Every early exit from Step 4 — `abort` at any prompt, a failed write (Rule 4), a Step 4b.0 STOP — runs this protocol. No exit branch defines its own disposition; they all point here.
+
+1. **State what landed.** List every write already executed in this session. These writes are LIVE in Firebase — a write takes effect the moment it runs, not at `complete_session`. Never describe landed writes as "uncommitted".
+2. **Empty session (0 writes landed):** always close it via `complete_session` — an open empty session is an orphan. Then go to step 4.
+3. **≥1 write landed — offer three options and wait for an explicit choice:**
+   - `rollback` — call `rollback_session(session_id)`, then complete/annotate the session per the tool's contract; re-read the rolled-back paths and confirm they match their Before snapshots.
+   - `keep` — call `complete_session` on what landed; the run status is `⚠️ PARTIAL`.
+   - `leave-open` — the session stays active. Warn explicitly: it is an orphan until handled (a later rollback or completion must find it via the running log).
+4. **Log regardless of choice (REAL only):** append a `Run N — aborted/partial` entry to `tickets/{TICKET_KEY}/session-log.md` recording the session_id, env, which writes landed (with field-minimized, redacted rollback state), and the chosen disposition. On dry-run nothing landed and no logs are touched — just exit and note the abort in Step 4f.
+
+### Non-standard write branch (oversize / array payloads)
+
+BEFORE attempting any write whose payload exceeds ~100 KB, or whose target path holds an **array** while the operation is `update_full` / `create`, run this branch:
+
+1. **Snapshot first.** Save only the changed fields and minimal rollback dependencies to `tickets/{TICKET_KEY}/snapshots/{env}-{sanitized-path}-{DATE}.json`, recursively redacting secret-looking keys and omitting unrelated fields; record its sha256 (`shasum -a 256`). If exact rollback would require retaining a secret value, refuse the out-of-band write rather than persisting that secret.
+2. **Rollback recipe before the write.** Write the manual-rollback recipe into `session-log.md` BEFORE the write executes: the tool (or CLI command) to restore, the path, and the snapshot file + sha256. If the write later fails half-way, this recipe is the recovery path.
+3. **Session-tooling bypass needs typed approval.** If the write cannot go through `write_rtdb` / `write_firestore` (e.g. payload too large, array shape rejected) and must use the firebase CLI or another out-of-band tool, say so explicitly and require the user to type `bypass approved`. After the bypassed run, annotate-and-close the empty session (`complete_session` with a note that the write happened out-of-band, recorded in session-log.md) so no orphan session remains — a session with zero recorded operations and no annotation is a broken rollback trail.
+4. **Post-write verification is mandatory.** Re-read the path and compare against the intended value — sha256 comparison for large content, field-by-field otherwise.
+
+**Array-path pitfalls:** `update_full` on an array-typed path may be rejected outright; `create` on a child path can generate a push key and silently corrupt the array shape (object-with-push-key where an indexed array should be). Always verify the SHAPE of the value after the write, not just its content.
+
 **Consult the DB map first.** Check whether `.claude/skills/_shared/references/firebase-db-map.md` exists.
 
-**If the map file does NOT exist:** skip the consult/staleness/append logic and fall back to pre-map behavior — for every write, confirm the DB type from the deploy plan itself; if the plan doesn't state it, query both `query_rtdb` and `query_firestore` against the target path during 4b.i pre-flight to determine which holds the data, and pick the matching write tool. Print a one-line note: `Note: firebase-db-map.md not found; falling back to per-path probe before each write.` Continue with Step 4 as normal.
+**If the map file does NOT exist:** skip the consult/staleness/append logic and fall back to pre-map behavior — for every write, confirm the DB type from the deploy plan itself; if the plan doesn't state it, query both `query_rtdb` and `query_firestore` against the target path during 4b.i pre-flight to determine which holds the data, and pick the matching write tool. Issue both probes for a path in a single turn (parallel tool calls), not two sequential turns. Print a one-line note: `Note: firebase-db-map.md not found; falling back to per-path probe before each write.` Continue with Step 4 as normal.
 
 **If the map file exists:** for every write in the deploy plan, cross-check its path against the map before choosing the tool. First, glance at its `Last refreshed:` header — if the date is >60 days old, ask the user `The Firebase DB map was last refreshed {DATE} ({N} days ago); refresh before applying? (yes/no)` and only proceed after confirmation (stale maps are a real risk when writes are about to hit prod / uat). If the path is listed, use the stated DB (`write_rtdb` vs `write_firestore`) — and flag any mismatch with what the deploy plan says as a Drift / Plan inconsistency under Step 4f Notes. If the path is NOT listed, query both DBs in the pre-flight read (4b.i) to confirm which one holds it, then append a row to the `## Discovered paths` section of the map (`path | DB | first-seen | last-verified | source: {TICKET_KEY}`).
 
@@ -188,7 +255,7 @@ create_session(
 )
 ```
 
-Save the session_id for all subsequent writes. **Skip on dry-run** — use the placeholder `sim-{ENV}-{TICKET_KEY-lower}-{YYYYMMDD}` in Step 4f's report.
+Save the session_id for subsequent write operations and the protected audit log. **Skip on dry-run** — Step 4f reports that no audited session was created without inventing an identifier.
 
 ### 4a.5. Append Running Log — REAL only
 
@@ -198,7 +265,7 @@ Save the session_id for all subsequent writes. **Skip on dry-run** — use the p
 {DATE TIME} | {SESSION_ID} | {ENV} | {TICKET_KEY} | apply | {brief description}
 ```
 
-This is the single source of truth required by `.claude/rules/firebase-safety.md`. If `apply-fix` aborts before reaching Step 4d (e.g. user rejects a write), this line still records that a session was created — `summarize-firebase-session` and rollback tooling depend on it.
+This is the single source of truth required by `.claude/rules/firebase-safety.md`. If `apply-fix` aborts before reaching Step 4d (e.g. user rejects a write), this line still records that a session was created — session audits and rollback tooling depend on it.
 
 **Skip on dry-run** — corrupting the log with fabricated session ids would block future rollback. Step 4f's report flags the skipped log entries.
 
@@ -209,7 +276,7 @@ Run **once**, immediately after 4a.5, **before** the per-write loop. Skip entire
 **Procedure:** [template-artifact-resolution.md](./references/template-artifact-resolution.md) — parses the plan's full-sha256 block, hash-verifies local twig/css files, prompts on drift (3-option a/b/c), validates `<ARTIFACT T_id ...>` placeholder references, and builds the in-memory `artifact_map` consumed by Step 4b.iii.
 
 **Critical invariants** (the reference enforces, but callers must know):
-- Every STOP path in this sub-step (malformed full-sha256 block, missing local file, drift-prompt option `b` or `c`, undefined T_id, `(unchanged)` reference) closes the empty session via `complete_session` and appends a `Run N — aborted at Step 4b.0` entry to `session-log.md` (REAL mode only).
+- Every STOP path in this sub-step (malformed full-sha256 block, missing local file, drift-prompt option `b` or `c`, undefined T_id, `(unchanged)` reference) runs the **Mid-loop exit protocol** — at this point 0 writes have landed, so the session is empty and is always closed via `complete_session`, and a `Run N — aborted at Step 4b.0` entry is appended to `session-log.md` (REAL mode only).
 - Drift is **never** silently accepted — always prompted via the 3-option menu.
 - The local file is the source of truth for the write; the plan's sha256 is the integrity check, not the content.
 
@@ -221,7 +288,9 @@ Run **once**, immediately after 4a.5, **before** the per-write loop. Skip entire
 
 **Step 4b.i — Pre-write read (always, both modes):**
 
-Read the path on `{ENV}` and capture the value as the `Before:` snapshot for Step 4f's report and the rollback plan. Use `query_rtdb` for RTDB paths, `query_firestore` for Firestore. Reads are safe in any mode.
+Read the path on `{ENV}` and capture the exact value for in-memory drift comparison. For the rollback log and Step 4f report, retain only changed fields and minimal rollback dependencies, recursively redact secret-looking keys, and omit unrelated fields. Use `query_rtdb` for RTDB paths, `query_firestore` for Firestore. Reads are safe in any mode.
+
+**Batching:** when the deploy plan has multiple writes to distinct paths, issue ALL 4b.i pre-write reads in one parallel turn BEFORE entering the serial per-write loop, and reuse the captured snapshots inside the loop. Approvals (4b.iii) stay strictly serial — one `yes` per write; only the reads are batched.
 
 **Create-on-absent special case** (template artifacts or otherwise): if the deploy plan's `Before:` block reads exactly `path does not exist on UAT — fresh create` (or the env-appropriate variant) AND the fresh read returns null / empty / not-found, that's a confirmed match — record `Before: confirmed absent` for Step 4f and proceed.
 
@@ -235,11 +304,11 @@ Plan asserts {path} does not exist on {ENV}, but it does now.
 Current state on {ENV}:
 [paste the fresh read result, truncated to <8 KB; template fields shown as sha256 + size descriptors per Format B conventions]
 
-Continue with this deploy step despite the drift? (yes / no / abort)
+Continue with this deploy step despite the drift? (yes / skip / abort)
 ```
 
-- `no` → stop the write step; mark as `⚠️ skipped` in Step 4f; continue to the next write.
-- `abort` → exit the per-write loop. Complete the session (per the 4b.ii abort pattern); record the abort in session-log.md.
+- `skip` → stop the write step; mark as `⚠️ skipped` in Step 4f; continue to the next write.
+- `abort` → exit the per-write loop and run the **Mid-loop exit protocol**.
 - `yes` → record the drift event under Step 4f Notes (`Plan asserts {path} absent, found data on {ENV}; user acknowledged at <timestamp>`) AND proceed to Prompt 2.
 
 **Prompt 2 — operation-type confirmation (only fires after Prompt 1 yes):**
@@ -252,11 +321,12 @@ Operation-type change required:
   Effective op:    update_full (overwriting existing data with the plan's data block)
 
 Proceeding will REPLACE the current state shown above with the plan's data block.
-Confirm operation change? (yes / no)
+Confirm operation change? (yes / skip / abort)
 ```
 
-- `no` → stop the write step; mark as `⚠️ skipped` in Step 4f; continue to the next write. The user can re-run /prepare-uat with corrected semantics if they meant to update rather than create.
-- `yes` → the wire call uses `operation: update_full` instead of the plan's `create`. The freshly-read existing data becomes the rollback `Before:` snapshot (replacing the plan's `path does not exist on UAT` sentinel). Step 4f's Execution Trace MUST record both the plan's declared op and the executed op (`Declared: create | Executed: update_full (operation flip on drift)`).
+- `skip` → stop the write step; mark as `⚠️ skipped` in Step 4f; continue to the next write. The user can re-run /prepare-uat with corrected semantics if they meant to update rather than create.
+- `abort` → exit the per-write loop and run the **Mid-loop exit protocol**.
+- `yes` → the wire call uses `operation: update_full` instead of the plan's `create`. The freshly-read existing data becomes the rollback `Before:` snapshot (replacing the plan's `path does not exist on UAT` sentinel). Step 4f's shared Execution Trace records developer-facing terms only: `Declared: create | Executed: full replacement (operation changed after drift)`.
 
 Splitting the prompt is mandatory — never combine drift acknowledgement and operation-type change into one `yes`. The user is making two different decisions: "is the unexpected data OK?" and "is replacing it OK?" Each gets its own surface.
 
@@ -268,8 +338,10 @@ Two formats are possible in the plan's `Before:` block depending on the field ty
 
 Compare the just-read value against the deploy plan's `Before:` snapshot, but ONLY on the fields the write step's `data` block touches (or the explicit target field for `update_partial`). Ignore housekeeping fields the plan doesn't change (`updatedAt`, `updatedBy`, etc.).
 
+**Exception — `update_full` ops compare the ENTIRE document.** An `update_full` replaces the whole node, so the drift scope is the whole node: compare every field of the live document against the plan's full `Before:`, and additionally flag any field present live but ABSENT from the write's `data` block — that field would be silently deleted by the write. Surface such fields explicitly (`field X exists on {ENV} but is not in the write payload — update_full will DELETE it`) and require the same yes/skip/abort choice.
+
 - Match → continue.
-- Differ → surface a diff (`field X: plan Before = a, current {ENV} = b`) and ask `Plan's Before snapshot is stale on this step — current {ENV} value differs on a field this write would change. Continue? (yes / no / abort)`. On `yes`, replace the in-memory `Before:` snapshot with the freshly-read value for Step 4f's report and rollback. On `abort`, stop and complete-session on whatever was already written (REAL mode).
+- Differ → surface a diff (`field X: plan Before = a, current {ENV} = b`) and ask `Plan's Before snapshot is stale on this step — current {ENV} value differs on a field this write would change. Continue? (yes / skip / abort)`. On `yes`, replace the in-memory `Before:` snapshot with the freshly-read value for Step 4f's report and rollback. On `skip`, skip this write (`⚠️ skipped` in Step 4f) and continue. On `abort`, run the **Mid-loop exit protocol**.
 
 **Format B — Integrity record (sha256 + excerpt + size)** for template-artifact writes — when the `Before:` block contains lines like `Before-template-sha256: <64-char hex>`:
 
@@ -280,7 +352,7 @@ The plan's recorded value for the field is a hash, not the raw string. Don't try
    - Compare the full 64-char hex to `Before-{field}-sha256`.
 2. Outcome:
    - Match → continue.
-   - Differ → surface a diff (`{field}: plan Before sha256 = {first 16}…{last 16}, current {ENV} sha256 = {first 16}…{last 16}, current size = {N KB}, plan size = {N KB}`) and ask the same yes/no/abort prompt as Format A. On `yes`, replace the in-memory `Before:` snapshot's sha256 with the freshly-computed hash and add a note under Step 4f's Notes section that the plan's recorded Before drifted from {ENV}.
+   - Differ → surface a diff (`{field}: plan Before sha256 = {first 16}…{last 16}, current {ENV} sha256 = {first 16}…{last 16}, current size = {N KB}, plan size = {N KB}`) and ask the same yes/skip/abort prompt as Format A. On `yes`, replace the in-memory `Before:` snapshot's sha256 with the freshly-computed hash and add a note under Step 4f's Notes section that the plan's recorded Before drifted from {ENV}.
 3. The verbatim sibling-field block in the plan's `Before:` (a sub-section labeled `# Sibling fields (verbatim):`, present on update writes) is honored as ground truth for Step 4b.iv's post-write check — capture it now for use after the write succeeds.
 
 Apply Format A and Format B independently per field. A single `Before:` block can contain both — for example, an `update_partial` that touches `template` (Format B: hash) while declaring sibling `label`, `kind`, `active` (Format A: verbatim).
@@ -310,15 +382,17 @@ Proposed change:
   styles:  <ARTIFACT T1 css  — 3 KB,  sha256 8e44d10f…3456 (verified vs plan: match), source: document-templates/Memorial Slideshow Cover/Memorial Slideshow Cover.css>
 [Non-template fields render verbatim as usual: label: "Memorial Slideshow Cover", active: true, etc.]
 
-Approve this write? (yes / no / skip)
+Approve this write? (yes / skip / abort)
 ```
 
 The synthetic descriptor is the only visible representation of the template content — the actual bytes are still substituted into the wire call. The descriptor must always carry: T_id, file type, size, full-sha256 prefix+suffix, verification verdict (match vs DRIFT-accepted), and the local source path. If any of those is missing, Step 4b.0 didn't complete properly — re-run it.
 
 Wait for response:
 - **yes** → REAL mode: execute `write_rtdb` / `write_firestore` with the SUBSTITUTED data block (real bytes in the `template` / `styles` fields), the session_id, and `allow_writes: true`. DRY-RUN: log the call as `(SIMULATED)` for Step 4f; do not call the write tool. For Step 4f's Execution Trace, record the substituted-payload sizes (e.g. `template: <T2 twig substituted, 46080 B>`) — do NOT paste the raw 45 KB content into the deploy-result.md.
-- **no** → stop. REAL mode: do NOT call `complete_session`; inform the user writes are uncommitted (the running-log line already records the abort). DRY-RUN: just exit.
 - **skip** → skip this write, continue to the next. Mark as `⚠️ skipped` in Step 4f.
+- **abort** → exit the per-write loop and run the **Mid-loop exit protocol**.
+
+**Dev-only batch approval:** on `dev` only, when Step 3c's reconciliation came back clean, the user may ask to see all {N} write previews up front; after ALL previews have been shown, the exact typed phrase `approve all N writes` (with the real N) executes them without further per-write prompts. Any other answer falls back to the per-write loop. This batch path is explicitly NOT available for `uat` or `prod` — those envs are one `yes` per write, always.
 
 **Step 4b.iv — Sibling-fields integrity check (REAL only, after each successful write):**
 
@@ -335,10 +409,15 @@ If either comparison surfaces a discrepancy, surface it in 4f's report and ask t
 
 ### 4c. Complete Session — REAL only
 
-Only after ALL writes are approved and executed:
+After the per-write loop ends, call `complete_session` if **at least 1 write executed**:
 ```
 complete_session(session_id: "{SESSION_ID}")
 ```
+
+- All writes executed → overall status ✅.
+- Any write skipped (drift `skip`, reconciliation `drop`, per-write `skip`) → overall status is `⚠️ PARTIAL`. The PARTIAL status flows into Step 4f's deploy-result.md and the Jira-facing summary — never report a partial run as a full pass.
+- 0 writes executed → the Mid-loop exit protocol already closed the empty session; do not call `complete_session` twice.
+- Loop exited early via `abort` or a write error → the Mid-loop exit protocol owns the disposition; this step does not run independently.
 
 **Skip on dry-run.**
 
@@ -351,7 +430,7 @@ Record:
 - Environment (`dev` / `uat` / `prod`)
 - Date and time
 - Each path written and the operation used
-- The "State Before Fix" — paste the value captured in Step 4b.i (or the post-drift-acceptance value from 4b.ii) for each path
+- The "State Before Fix" — record only fields changed by the write plus the minimal parent data needed to restore them. Recursively redact secret-looking keys and omit unrelated fields; never paste raw query output.
 - **Pre-flight verdict** — `Pre-flight: PASS`, `Pre-flight: WARN (acknowledged: R7, R8, ...)`, or `Pre-flight: SKIPPED (dispatch failure: <reason>)` — captured from Step 2's checker dispatch
 
 This file is the primary rollback reference. Without the session_id, rollback requires reconstructing old data manually.
@@ -387,7 +466,7 @@ Mode-specific rules:
 | Setting | REAL run | DRY-RUN |
 |---|---|---|
 | Title badge | `# {TICKET_KEY}: {ENV} Deploy Result — REAL` | `# {TICKET_KEY}: {ENV} Deploy Result — DRY-RUN SIMULATION` |
-| Command blocks in Execution Trace | shown as issued, with the real `session_id` and live response payload | tagged `(SIMULATED)`; `session_id` uses a `sim-{ENV}-{TICKET_KEY-lower}-{YYYYMMDD}` placeholder; response payload is fabricated to reflect what the call *would* return |
+| Execution Trace | developer-facing operation summary with sanitized before/after fields and outcome; no session identifiers, command names, or raw response payloads | tagged `(SIMULATED)` with the proposed operation and expected outcome; never fabricate a response |
 | Verification table | actual PASS/FAIL from real post-flight reads | every row tagged `🔵 PENDING — real run only`; plan inconsistencies surfaced under Notes |
 | Sign-off "Real run executed" item | ticked | unticked, with the line "this document represents a dry-run only" |
 | Notes section | run-specific outcome | explicit reminder that `{ENV}` is unchanged and a real run is still required |
@@ -397,13 +476,19 @@ For multi-run scenarios (a deploy was previously attempted and now retried/exten
 
 ### 4g. Output Guardian pass on deploy-result.md
 
-Re-read the saved `deploy-result.md` and strip anything that violates `.claude/rules/output-guardian.md`:
+Scan only the newly appended `## Run N` block — earlier runs already passed this gate on their own runs; do not re-read the whole ledger. One-liner:
+
+```bash
+awk '/^## Run /{block=""} {block=block $0 "\n"} END{printf "%s", block}' tickets/{TICKET_KEY}/deploy-result.md | grep -nE 'firebase-explorer|mcp__|query_rtdb|query_firestore|write_rtdb|write_firestore|create_session|complete_session|rollback_session|update_partial|update_full|session_id|tickets/|sessions/|\.claude/|session-log\.md|deploy\.md|rca\.md|spec\.md|\[Image'
+```
+
+Read surrounding lines only for hits, then strip anything that violates `.claude/rules/output-guardian.md`:
 - No tool names in narrative prose (`firebase-explorer`, `mcp__...`, `getConfluencePage`, etc.)
 - No "Session 124 applied" / "AI investigated" / "Claude confirmed" / "queried via" phrasing
-- No internal session-id leakage in headings or summary tables — keep real session ids inside fenced code blocks
+- No session identifiers anywhere — rollback references stay only in the protected audit log
 - No references to local workspace files in prose — neither bare filenames (`deploy.md`, `session-log.md`, `running-log.md`, `rca.md`, `spec.md`, `rollback.md`), nor paths under `tickets/...`, `sessions/...`, `.claude/...`, nor relative links. Replace with inline prose ("the approved deploy plan", "the session log was updated for this run"). Repo code paths like `FCRM-Web/src/forms/FormController.ts:42` are fine.
 
-The only allowed tool references are inside fenced command blocks (`query_rtdb` / `query_firestore` / `write_rtdb` / `write_firestore` / `create_session` / `complete_session` / `rollback_session`) — those are deploy syntax, not narration.
+Do not include internal command or integration identifiers anywhere in the result, including fenced blocks.
 
 ### 4h. Upload deploy-result.md to Google Drive — REAL + (uat | prod) only, opt-in per run
 
@@ -443,9 +528,9 @@ Skip entirely otherwise: no Template Artifacts section, no drift, or DRY-RUN.
 
 Skip Step 5 entirely if spec.md has no Code Changes section.
 
-**Procedure:** [code-fix-flow.md](./references/code-fix-flow.md) — blast-radius summary via `search_with_context` (5.0), code-fix pre-flight via `pipeline-checker` against `./code-checker-prompt.md` (5a), per-file approval edit loop (5b), post-edit verification via `get_review_context` (5c).
+**Procedure:** [code-fix-flow.md](./references/code-fix-flow.md) — blast-radius summary via `search_with_context` (5.0), code-fix pre-flight via `pipeline-checker` against `./code-checker-prompt.md` (5a), per-file approval edit loop (5b), post-edit verification via `git diff --name-only` / `git diff --stat` against the spec's file list (5c).
 
-**Pre-flight rubric:** `./code-checker-prompt.md` in this skill folder is the authoritative source for code-fix checks (CR1-CR8). Keep it in sync with the reference.
+**Pre-flight rubric:** `./code-checker-prompt.md` in this skill folder is the authoritative source for code-fix checks (CR1–CR9). Keep it in sync with the reference.
 
 **Key invariant:** no git branches or commits are created by this skill — the user handles git after the edits land.
 
@@ -466,25 +551,25 @@ Config changes: {N} Firebase writes {executed | simulated} on {ENV}
 Code changes: {N} files modified
 Template artifacts: {N artifacts ({M new, K updated}); X files drifted from plan, Y re-uploaded to Drive | n/a — no Template Artifacts section in deploy plan}
 Verification: {N/N PASS | N/N PENDING — dry-run}
-Result file: tickets/{TICKET_KEY}/deploy-result.md ({Run N appended})
+Deployment record: Run {N} appended
 Drive mirror (deploy-result): {DRIVE_WEB_URL[ — latest run only, {N} total in local ledger] | n/a — dry-run | n/a — dev (Drive mirror is uat/prod only) | skipped — user declined | upload failed: <reason>}
 Drive mirror (templates): {N re-uploaded, K declined, L not configured | n/a — no drift detected | n/a — no Template Artifacts | skipped — dry-run}
-Session id: {real id | n/a — dry-run}
+Rollback reference: {recorded in the protected audit log | n/a — dry-run}
 
 Next steps:
-- Run `/ticket-comment {TICKET_KEY}` to post what was done {(real runs only)}
+- Post the progress update to Jira {(real runs only)}
 - Assign to QA for testing {(real runs only)}
-- {Dry-run: review deploy-result.md, then re-run without --dry-run when ready}
+- {Dry-run: review the deployment result, then rerun in real mode when ready}
 ```
 
 ---
 
 ## Rules
 
-1. **Never auto-approve.** Every write requires explicit "yes" from the user.
+1. **Never auto-approve.** Every write requires explicit "yes" from the user. The single exception is the dev-only typed batch approval (`approve all N writes`, Step 4b.iii) — itself an explicit user approval issued after ALL previews were shown; never available on uat / prod.
 2. **Show current state before writing.** Always query the current value before proposing a change.
 3. **Production writes get an extra warning.** No exceptions.
-4. **If a write fails, stop.** Do NOT complete the session. Report the error.
+4. **If a write fails, stop.** Report the error verbatim, then run the **Mid-loop exit protocol** (Step 4) — never retry inside the same session, and never leave the exit undocumented.
 5. **If spec and deploy.md conflict, stop** and ask the user which to follow.
 6. **Never guess Firebase paths** — only write to paths explicitly in deploy.md.
 
@@ -492,13 +577,13 @@ Next steps:
 
 If you catch yourself thinking any of these, the next action is NOT what you were about to do. Pause and re-read the relevant Rule / Step.
 
-- "Let me batch-approve the remaining writes to save time." → Rule 1. Every write needs its own `yes`.
+- "Let me batch-approve the remaining writes to save time." → Rule 1. Every write needs its own `yes` — the only sanctioned batch is the dev-only typed `approve all N writes` after all previews were shown; never infer it, never offer it on uat / prod.
 - "The dry-run already proved this works, I can skip pre-flight on the real run." → Step 2 + Step 4b.i. Pre-flight runs every time; real-env state may have drifted since the dry-run.
 - "The Before snapshot doesn't match the live read, but it's close enough." → Step 4b.ii. Any drift requires explicit user acknowledgement; the fresh value then replaces the stale snapshot in the result file.
 - "I'll infer the DB type (RTDB vs Firestore) from the path." → Rule 6 + `firebase-safety.md`. If the deploy plan doesn't state it, query both and confirm before writing.
 - "The deploy file path looks slightly different but it's clearly the same fix." → Step 1c. Use ONLY the file resolved by the locator; never silently merge two deploy files.
 - "Code dependency is probably live, the deploy plan looks safe." → Step 3a. Get explicit user confirmation on uat / prod before any write — never infer.
-- "The first write failed; I'll retry inside the same session." → Rule 4. A failed write means STOP. Investigate, then start a NEW session if needed.
+- "The first write failed; I'll retry inside the same session." → Rule 4. A failed write means STOP and run the Mid-loop exit protocol. Investigate, then start a NEW session if needed.
 - "I'll run prod first attempt as REAL because the deploy plan was reviewed." → Step 3. Prod first attempt is dry-run; REAL prod runs require both the extra warning AND explicit `yes`.
 - "Verification row V2 looks like it would pass — I'll mark it ✅." → Step 4e. Only mark PASS after the actual post-flight read returns the expected value. DRY-RUN is always `🔵 PENDING`.
 - "The `<ARTIFACT T1 twig>` in the data block is obvious — apply-fix will figure it out, no need to substitute." → Step 4b.0 + 4b.iii. The literal placeholder string must be replaced with the local file's bytes before the write call. A skipped substitution writes the literal placeholder string into Firebase and silently corrupts the template.
@@ -513,9 +598,9 @@ If you catch yourself thinking any of these, the next action is NOT what you wer
 | Mistake | What to do instead |
 |---|---|
 | Using `write_rtdb` for a Firestore path (or vice versa). | Match the DB column from the Writes table. If the plan doesn't state it, query both before writing. |
-| Approving all writes at once (`yes, yes, yes, …`) to move faster. | One `yes` per write, after seeing the proposed change. |
+| Approving all writes at once (`yes, yes, yes, …`) to move faster. | One `yes` per write, after seeing the proposed change. On dev only, the typed `approve all N writes` batch (after all previews) is the sanctioned shortcut. |
 | Running `apply-fix {KEY} prod` REAL as the first prod attempt. | Always `apply-fix {KEY} prod --dry-run` first. Only re-run REAL after reviewing the dry-run result file. |
-| Including session ids, `firebase-explorer`, or `tickets/{KEY}/…` paths in `deploy-result.md` prose. | Step 4g Output Guardian pass — session ids live inside fenced command blocks only; tool refs only as deploy syntax; no workspace paths in narrative. |
+| Including session ids, internal command names, or `tickets/{KEY}/…` paths in `deploy-result.md`. | Step 4g Output Guardian pass — rollback references stay in the protected audit log; the shared result uses developer-facing descriptions only. |
 | Marking the Verification matrix PASS without running the post-flight read. | Only PASS after the read returns the expected value; ❌ on mismatch; `🔵 PENDING — real run only` on dry-run. |
 | Re-using a session id after a failed write to "continue from where it stopped". | Stop the session, investigate the failure, start a fresh session for the retry. |
 | Skipping the sibling-fields integrity check because "I only updated one field". | Step 4b.iv runs every time — even single-field updates can clobber siblings on `update_full`. |
@@ -527,13 +612,17 @@ If you catch yourself thinking any of these, the next action is NOT what you wer
 - [ ] Run mode (`REAL` vs `DRY-RUN`) resolved from `$ARGUMENTS` and surfaced in the Step 3 confirmation
 - [ ] Pre-flight check (Step 2) ran — verdict captured (PASS / WARN with acknowledged rule IDs / SKIPPED with reason)
 - [ ] Code-dependency notice surfaced and explicitly confirmed by the user before any write (uat / prod only; skipped for dev)
-- [ ] No Firebase write executed without explicit `yes` from the user
+- [ ] No Firebase write executed without explicit `yes` from the user (dev-only exception: the typed `approve all N writes` batch after all previews were shown)
+- [ ] Live-state reconciliation (Step 3c) batch-read every planned path before `create_session`; all mismatches presented at once and resolved (proceed / drop / abort)
+- [ ] Any early exit from Step 4 (abort / write failure / 4b.0 STOP) ran the Mid-loop exit protocol — landed writes listed, disposition chosen (rollback / keep / leave-open), aborted-run entry appended to session-log.md (REAL)
+- [ ] Any skipped/dropped write produced overall status `⚠️ PARTIAL` in deploy-result.md and the Jira-facing summary — never reported as a full pass
+- [ ] Oversize (~100 KB+) or array-typed `update_full`/`create` writes ran the Non-standard write branch — snapshot + sha256 saved, rollback recipe logged BEFORE the write, any tooling bypass approved via typed `bypass approved` with the empty session annotated-and-closed, post-write shape+content verified
 - [ ] Current state of each path queried before proposing the change (4b.i)
 - [ ] Drift check (4b.ii) compared the fresh read to the plan's `Before:` snapshot on fields this write changes; any drift surfaced and explicitly accepted; freshly-read value replaced the stale `Before:` for report + rollback
 - [ ] Sibling-fields integrity check (4b.iv) performed on every successful write (REAL) or simulated (DRY-RUN)
 - [ ] Production writes received the extra warning AND received explicit confirmation (REAL mode only)
 - [ ] On REAL: Session created for the target env, `session_id` saved before any write
-- [ ] On REAL: Session completed ONLY after all approved writes succeeded — never on failure
+- [ ] On REAL: Session completed when ≥1 write executed (status PARTIAL if any skipped); on failure/abort the Mid-loop exit protocol chose the disposition — never a silent unclosed session
 - [ ] On REAL: State Before Fix recorded for each path in `tickets/{TICKET_KEY}/session-log.md`
 - [ ] On REAL: Session log entry includes: `session_id`, env, date, every path written, the pre-flight verdict
 - [ ] On REAL: Running log appended to `sessions/running-log.md`
@@ -578,7 +667,7 @@ If you catch yourself thinking any of these, the next action is NOT what you wer
 - [ ] Step 4f's deploy-result.md does NOT contain the verbatim twig/css content — only sha256 / size / source-path descriptors
 - [ ] Step 7 summary covers Template artifacts (counts, drift, re-uploads) and Drive mirror (templates) verdicts
 - [ ] On a Step 4b.0 STOP (malformed plan / missing local file / drift abort / undefined T_id / unchanged-reference): if a session was created in 4a, `complete_session` was called before exit and a `Run N — aborted at Step 4b.0` entry was appended to session-log.md
-- [ ] On a Step 4b.i create-on-absent drift (plan asserts absent, fresh read returns data): TWO structured prompts were issued — drift acknowledgement first, operation-type confirmation second; both required explicit `yes` before any write; Step 4f Execution Trace recorded both `Declared: create` and `Executed: update_full (operation flip on drift)`
+- [ ] On a Step 4b.i create-on-absent drift (plan asserts absent, fresh read returns data): TWO structured prompts were issued — drift acknowledgement first, operation-type confirmation second; both required explicit `yes` before any write; Step 4f Execution Trace recorded `Declared: create` and `Executed: full replacement (operation changed after drift)`
 
 ## Next step
 
@@ -588,9 +677,9 @@ After completing this skill, select EXACTLY ONE action from the decision tree be
 
 | Env just applied to | `{ACTION_LINE}` |
 |---|---|
-| `dev` | `/ticket-comment {TICKET_KEY}, then /apply-fix {TICKET_KEY} uat to promote` |
-| `uat` | `/ticket-comment {TICKET_KEY}, then /apply-fix {TICKET_KEY} prod to promote` |
-| `prod` | `/ticket-comment {TICKET_KEY}, then /publish-rca {TICKET_KEY} to finalize` |
+| `dev` | `Post the progress update to Jira, then promote {TICKET_KEY} to UAT.` |
+| `uat` | `Post the progress update to Jira, then promote {TICKET_KEY} to production.` |
+| `prod` | `Post the progress update to Jira, then publish the finalized RCA.` |
 
 **Block to print:**
 

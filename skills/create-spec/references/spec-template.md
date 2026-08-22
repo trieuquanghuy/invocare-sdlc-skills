@@ -7,6 +7,7 @@
 - Use {ENV} for environment names so this spec is reusable for dev and UAT
 - Dry-run queries must verify state BEFORE each write — not just confirm after
 - Use `query_rtdb` / `write_rtdb` for Realtime Database paths; `query_firestore` / `write_firestore` for Firestore paths
+- Omit-empty rule: sections marked removable (Environment Mapping when all STABLE, Deployment Plan for same-sprint, Code Changes for config-only, Option B when session tooling is healthy) are deleted entirely when they do not apply — never left as headers with n/a
 - If Target Sprint is in the future, Status starts as "on-hold" — apply to dev for testing, then revert until that sprint
 
 ---
@@ -14,7 +15,7 @@
 # [TICKET_KEY]: Fix Specification
 
 **Ticket:** [[TICKET_KEY]]([JIRA_URL]/browse/[TICKET_KEY]) — [JIRA_TITLE]
-**RCA:** [tickets/[TICKET_KEY]/rca.md](rca.md)
+**Root cause:** [one confirmed root-cause sentence]
 **Fix Type:** config | code | mixed
 **Target Sprint:** Sprint [N]
 **Status:** on-hold | ready-to-apply | applied-dev | applied-uat | applied-prod
@@ -24,15 +25,12 @@
 
 ## Summary
 
-[1–2 paragraphs readable without opening rca.md:
+**Classification:** CONFIGURATION_GAP | CODE_DEFECT | DATA_MAPPING_GAP | NEW_FEATURE
+
+[1–2 self-contained paragraphs:
 - What is broken and for whom (specific feature, form, export, user group)
+- ONE root-cause sentence — the exact path/field/value that is wrong and why it causes the symptom (do not restate the extended investigation)
 - What this spec changes and the expected outcome after applying it]
-
-## Root Cause
-
-**Classification:** CONFIGURATION_GAP | CODE_DEFECT | DATA_MAPPING_GAP
-
-[1 paragraph: technical explanation of why the issue occurs — exact path, field, or value that is wrong and why it causes the symptom]
 
 ## Technical Approach
 
@@ -40,7 +38,7 @@
 [Specific paths, files, or templates being modified. Be concrete — name the field, the path, the function. Avoid vague phrasing like "fix the config" without saying which config.]
 
 ### Why this fixes the root cause
-[Cross-reference the root cause from rca.md. Explain the causal link: current state X causes symptom Y; changing X to Z eliminates Y because [mechanism].]
+[Explain the causal link: current state X causes symptom Y; changing X to Z eliminates Y because [mechanism].]
 
 ### Before / after state
 **Before:** [concrete value, e.g. `filename: 'foo.pdf'`]
@@ -109,7 +107,7 @@ Dev confirmed: `{RECORD_ID}` = `[dev_value_for_reference]`
 
 > If any path is `ENV_SPECIFIC` (see Environment Mapping above), resolve the correct ID for `{ENV}` before running these queries.
 
-Run these queries **before** any writes. If results differ from expected, stop and re-check rca.md.
+Run these queries **before** any writes. If results differ from expected, stop and re-check the confirmed evidence.
 
 **Check [what you're verifying] ([DB type]):**
 ```
@@ -118,7 +116,7 @@ query_rtdb(
   path: "[EXACT_PATH_FROM_RCA]"
 )
 ```
-Expected: [what the current value should look like before the fix]
+Expected: [what the current value should look like before the fix — for a CREATE-shaped change the expected pre-state is `not found` / absent]
 If different: [what that would mean — when to stop vs when to continue]
 
 ---
@@ -193,7 +191,7 @@ Why: [one sentence]
 
 ### Option A: Session Rollback (preferred)
 
-Requires the `session_id` from `tickets/[TICKET_KEY]/session-log.md`.
+Requires the recorded deployment `session_id`.
 
 ```
 validate_session_rollback(session_id: "[SESSION_ID_FROM_SESSION_LOG]")
@@ -210,46 +208,12 @@ query_rtdb(environment_name: "{ENV}", path: "[PATH_THAT_WAS_CHANGED]")
 ```
 Expected after rollback:
 ```
-[paste original value from rca.md evidence]
+[paste the confirmed original value]
 ```
 
-### Option B: Manual Rollback (fallback — session unavailable)
+### Option B: Manual Rollback (fallback — only when the session record is unavailable or invalid)
 
-> Use only when the session_id is no longer valid or session-log.md is missing.
-> For fixes with multiple writes: repeat Steps 3 (revert) per write, in REVERSE order from the original apply. Step 4 (complete session) runs once at the end.
-
-**Step 1: Capture current broken state before writing**
-```
-query_rtdb(environment_name: "{ENV}", path: "[PATH_TO_REVERT]")
-```
-If result already matches the original — rollback may already be done. Stop and verify.
-
-**Step 2: Create rollback session**
-```
-create_session(
-  environment_name: "{ENV}",
-  description: "[TICKET_KEY]: Manual Rollback"
-)
-```
-
-**Step 3: Revert [change description]**
-```
-write_rtdb(
-  environment_name: "{ENV}",
-  session_id: "<SID>",
-  allow_writes: true,
-  path: "[EXACT_PATH_THAT_WAS_CHANGED]",
-  operation: "delete | update_full",
-  data: {
-    [original field]: [original value — exact, from rca.md evidence]
-  }
-)
-```
-
-**Step 4: Complete session**
-```
-complete_session(session_id: "<SID>")
-```
+> Omit this section entirely when Option A is available. If needed at rollback time, the recipe is standard: (1) query each changed path to capture current state (if it already matches the original, stop — rollback may be done), (2) `create_session` with description "[TICKET_KEY]: Manual Rollback", (3) one `write_rtdb`/`write_firestore` per changed path restoring the original value from the Fix/Changes section, in REVERSE order of the original apply, (4) `complete_session`.
 
 ---
 

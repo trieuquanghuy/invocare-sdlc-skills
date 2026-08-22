@@ -2,7 +2,7 @@
 - This file is written by apply-fix AT RUNTIME — not at spec creation time
 - Append a new entry for EVERY action: apply, revert, re-apply, migration
 - Session ID is the most important field — it enables `rollback_session()` without needing old values
-- Capture current state BEFORE each write (the calling skill already queries this) — paste it here
+- Capture only changed fields and minimal rollback dependencies before each write; recursively redact secret-looking keys and omit unrelated fields
 - For deferred sprints: record the revert run so the next developer knows the fix was intentionally held
 - For migrations: record source env, target env, and ID remappings used
 
@@ -46,18 +46,18 @@
 
 **[path queried before write]:**
 ```json
-[paste query_rtdb / query_firestore result here — this is the state BEFORE this run]
+[field-minimized, redacted rollback state — never raw query output]
 ```
 
 ### Undo This Run
 
 **Preferred — session rollback:**
 ```
-validate_session_rollback(session_id: "[SESSION_ID]")
+rollback_session(session_id: "[SESSION_ID]")
 ```
 Then:
 ```
-rollback_session(session_id: "[SESSION_ID]")
+validate_session_rollback(session_id: "[SESSION_ID]")
 ```
 
 **If session unavailable**, use the rollback steps in `spec.md` (Option B) with the "State Before This Action" above.

@@ -26,6 +26,7 @@ WRITE_CAPABLE_ALLOWLIST = {
     "create-rca",
     "create-release-report",
     "create-spec",
+    "create-validation",
     "pr-code-review-fixer",
     "prepare-uat",
     "publish-rca",

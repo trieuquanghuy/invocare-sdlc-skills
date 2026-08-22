@@ -5,7 +5,7 @@
 - Each write step must include a `Before:` snapshot captured from UAT immediately before saving the file. **For template fields** (`template` / `styles` on a `document-templates/...` write): the `Before:` block carries `sha256 + 10-line excerpt + size` per Step 4.5f — NEVER the verbatim string. Sibling fields stay verbatim.
 - **Template Artifacts section** is mandatory whenever Step 4.5 ran. Render it between `## What This Does` and `## Environment-Specific IDs`. Omit entirely when no template was referenced.
 - Write `data: {}` blocks use `<ARTIFACT {T_id} twig>` and `<ARTIFACT {T_id} css>` placeholders for template fields — the literal twig/css body NEVER appears in the saved deploy file. `apply-fix` substitutes the placeholders at write time after re-hashing the local file.
-- Update writes get an `After:` block (sha256 + excerpt + size of the new local file) sibling to `Before:`.
+- Update writes get a one-line `After:` reference (`After: matches T{id} (twig sha256 {first8}…{last4}, {size} KB)`) sibling to `Before:` — the full integrity record lives only in the Template Artifacts block.
 - Output Guardian (`.claude/rules/output-guardian.md`) applies to the SAVED file: no internal tool names in prose, no session IDs, no AI/Claude references, no references to other workspace files (`rca.md`, `spec.md`, `session-log.md`, `running-log.md`, `tickets/...`, `./...`). Tool references are only allowed inside fenced query/write blocks — those are deploy syntax, not narration. `document-templates/{Name}/...` repo paths in the Template Artifacts section ARE allowed (same exemption as `FCRM-Web/src/...`). `<ARTIFACT T_id ...>` placeholders inside fenced write blocks ARE allowed (deploy syntax).
 - Author identity is the developer who prepared the deploy — never hardcode a person's name and never imply AI involvement.
 - Remove this IMPORTANT RULES block before saving.
@@ -62,9 +62,9 @@ T1.css.sha256:  [full 64-char hex digest of local document-templates/{Name}/{Nam
 
 The Technical Approach for this fix includes code changes that must be merged and deployed to UAT before applying the config below.
 
-| PR | Title | Status | Branch | Files |
-|----|-------|--------|--------|-------|
-| [#1234]([PR_URL]) | [PR title from `gh pr view`] | merged / open / closed | [head] → [base] | `[file 1]`, `[file 2]`, +[N] more |
+| PR | Title | Status |
+|----|-------|--------|
+| [#1234]([PR_URL]) | [PR title from `gh pr view`] | merged / open / closed |
 
 **Pre-apply check:** confirm the PR(s) above are merged and deployed to UAT before running `/apply-fix`.
 
@@ -140,21 +140,10 @@ Save the returned `session_id` — required for every write below and for rollba
    Write a single line: `path does not exist on UAT — fresh create`. No Before-{field}-sha256 capture for any field (there's nothing to hash). The Template Artifacts full-sha256 block above carries the integrity hash for the new content; `apply-fix` re-hashes the local file at write time against that record.]
 ```
 
-[If the operation is `update_partial` / `update_full` on a template-artifact write, add an After block sibling to Before:]
+[If the operation is `update_partial` / `update_full` on a template-artifact write, add a one-line After reference sibling to Before — the full integrity record (64-char sha256 + 10-line excerpt + size) lives ONLY in the Template Artifacts block above:]
 
-**After:** (projected new value — apply-fix re-verifies the local file matches before writing)
-
-```
-After-template-sha256: [full 64-char hex of the new local document-templates/{Name}/{Name}.twig — matches T[id].twig.sha256 from the Template Artifacts block]
-After-template-excerpt:
-  [first 10 non-blank lines of the new local twig]
-After-template-size: [bytes]
-
-After-styles-sha256: [full 64-char hex of new local css, or `(unchanged)`]
-After-styles-excerpt:
-  [first 10 non-blank lines, or `(unchanged)`]
-After-styles-size: [bytes, or `(unchanged)`]
-```
+**After:** matches T[id] (twig sha256 [first8]…[last4], [N] KB[; css sha256 [first8]…[last4], [N] KB if css changes — or omit]).
+Apply-fix re-verifies the local file against the Template Artifacts full-sha256 block before writing.
 
 **Write:**
 

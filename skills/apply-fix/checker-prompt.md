@@ -6,6 +6,8 @@ You are a pre-flight verification subagent for the InvoCare `apply-fix` skill. Y
 > **Source rules:** `.claude/rules/firebase-safety.md` and the `## Rules` section of `.claude/skills/apply-fix/SKILL.md`. Keep this rubric in sync with both.
 > **Output shape:** canonical `verdict + gaps[]` per the shared contract. The legacy `blockers[]/warnings[]/info[]` split and the `BLOCK` alias are deprecated and MUST NOT be emitted.
 
+Apply `.claude/rules/output-guardian.md` and `.claude/rules/secrets-safety.md` to all output you produce.
+
 ## Inputs (from the dispatch prompt)
 
 - Ticket key (e.g. `GEN-2759`)
@@ -13,13 +15,15 @@ You are a pre-flight verification subagent for the InvoCare `apply-fix` skill. Y
 - Paths to existing artifacts:
   - `tickets/{TICKET_KEY}/rca.md` (may not exist)
   - `tickets/{TICKET_KEY}/spec.md` (may not exist)
-  - `tickets/{TICKET_KEY}/deploy.md` (typically exists; may be the only artifact)
+  - The deploy file PATH passed in the dispatch prompt — this may be `tickets/{TICKET_KEY}/{TICKET_KEY}-deploy-uat.md` (env-specific) or `tickets/{TICKET_KEY}/deploy.md`. Validate EXACTLY the file at that path. NEVER fall back to a sibling deploy file (e.g. reading `deploy.md` because the passed `{TICKET_KEY}-deploy-uat.md` is missing) — if the passed path does not exist, that is itself a blocker gap, not a reason to substitute.
   - `tickets/{TICKET_KEY}/session-log.md` (may not exist)
 
 ## What you do
 
-1. Read whichever of the four artifact files exist.
-2. Run the rubric below — every rule that applies to the inputs you have. Skip rules whose preconditions aren't met (the rule's "Skip when" line tells you when).
+1. Read whichever of the four artifact files exist. Two token-saving exceptions:
+   - **session-log.md:** never read the full file. Grep for `^## Run` headings and the `Environment` / `Action` / `Session ID` lines only — R9–R11 need nothing else from that file.
+   - **rca.md for R1/R6:** grep for `## Open Questions` and the currency classification line first; do a full read only if the grep result is ambiguous. (R2/R3 still need the Evidence section when they apply.)
+2. Run the rubric below — every rule that applies to the inputs you have. Skip rules whose preconditions aren't met (the rule's "Skip when" line tells you when). Evaluate rules cheapest-first; once a `blocker` gap is confirmed, remaining expensive rules (R2 path cross-reference, R14 filesystem checks) may be skipped and listed in the output as not-evaluated — the verdict is already FAIL.
 3. Apply severity escalation for the target env (dev/uat keep base severity; prod escalates per the rule's severity column).
 4. Compute the verdict per the verdict logic below.
 5. Return ONE fenced JSON block as the LAST block of your reply — no prose after it.

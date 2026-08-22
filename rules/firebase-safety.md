@@ -11,7 +11,7 @@ The project has **two separate Firebase databases**: Realtime Database (RTDB) an
 | Realtime Database | `query_rtdb` | `write_rtdb` | Most config, team settings, documents, events, clients |
 | Firestore | `query_firestore` | `write_firestore` | Check ticket/evidence to confirm |
 
-**Never assume.** If the ticket or evidence doesn't specify, query both and confirm which one contains the data before proceeding.
+**Never assume.** If the ticket or evidence doesn't specify, query both as evidence discovery, then confirm the authoritative database from the ticket, schema, or owning application code. If the path exists in both databases or neither database, stop until corroborating evidence identifies the intended database; never choose one by convenience.
 
 In rca.md evidence tables, always include a `DB` column: `RTDB` or `Firestore`.
 In deploy.md write steps, always use the correct tool (`write_rtdb` vs `write_firestore`).
@@ -56,7 +56,7 @@ Example:
 2026-04-23 15:10 | def-456-uvw | uat | standalone | migration | GEN-2759 dev→uat migration
 ```
 
-This is the single source of truth for "what Firebase sessions were created in this Claude conversation." `summarize-firebase-session` reads this file to find all session IDs without scanning every ticket folder.
+This is the single source of truth for "what Firebase sessions were created in this Claude conversation" — any session audit or rollback tooling reads this file to find all session IDs without scanning every ticket folder.
 
 ---
 
@@ -70,7 +70,7 @@ After every Firebase write operation (`write_rtdb` or `write_firestore`), the se
 - Date and time
 - Action: `apply` / `revert` / `re-apply`
 - Each path written and the operation used
-- State before the write (paste the `query_rtdb`/`query_firestore` result captured before the write)
+- A field-minimized, redacted before-state record sufficient for rollback. Never paste raw query output; omit secret-looking values and unrelated fields.
 
 **Why this is non-negotiable:** Without the `session_id`, rollback requires knowing the exact original values for every changed path. The session log is the only reliable source for this.
 
@@ -80,7 +80,7 @@ After every Firebase write operation (`write_rtdb` or `write_firestore`), the se
 
 The session-log.md is a **cumulative running log** — never overwrite it. Always append a new `## Run [N]` entry. Increment N from the last entry in the file.
 
-Each run records its own action (`apply` / `revert` / `re-apply`) and its own `session_id`. This gives a complete audit trail and lets you roll back any specific run independently.
+Each run records its own action (`apply` / `revert` / `re-apply`) and its own `session_id`. Roll back overlapping runs in reverse chronological order. Before rolling back an older run, verify every affected path still matches that run's post-write state; if any path has changed, stop rather than overwrite later work.
 
 ---
 

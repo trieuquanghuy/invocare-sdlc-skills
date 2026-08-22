@@ -30,7 +30,7 @@ is the procedure.
 | What | Check |
 |---|---|
 | `code-review-kms` MCP connected | `/mcp` lists it. It provides `mh_list_open_prs`, `mh_start_review`, … |
-| `code-lesson-kms` MCP connected | Provides `get_development_rules` — the team-rules gate. Team-scoped; the gate auto-skips if absent, and says so. |
+| `code-lesson` MCP connected | Provides `get_development_rules` — the team-rules gate. Team-scoped; the gate auto-skips if absent, and says so. |
 | `MANAGER_HUB_TEAM_TOKEN` in the shell env | Referenced by name only, never printed. |
 | PR exists and is pushed | The review reads committed state (`git diff --merge-base origin/<base> HEAD`), not your working tree. |
 
@@ -44,7 +44,7 @@ Run the detection ladder in [`references/checkout-modes.md`](references/checkout
 2. Plain `.git`, current branch == `BRANCH`, HEAD == the PR's `headSha` → **`main`**.
 3. Neither → **STOP and ask**, printing what was found (branch, HEAD, dirty files) so the answer is one word.
 
-**Never assume the mode.** It changes STEP 0's preconditions and it *flips* which GitNexus tool can be trusted
+**Never assume the mode.** It changes STEP 0's preconditions and it *flips* whether the indexed impact reading can be trusted
 (runbook server gap #6). Never switch branches or stash on the user's behalf — in `main` mode that is their real
 working folder.
 
@@ -99,8 +99,8 @@ instead of the findings is how a round gets gamed.
   In `main` mode these sit in the user's everyday repo — see checkout-modes.md § Artifact hygiene.
 - **Never print** `MANAGER_HUB_TEAM_TOKEN`.
 - **Never call `mh_submit_result` on the code_review node before GATE 3.** One submission per round, on pushed state.
-- **Never cite a GitNexus reading without checking the mode** — `gitnexus_impact` is contaminated in `main` mode,
-  `gitnexus_detect_changes` is blind in `worktree` mode (server gap #6).
+- **Never cite an impact reading without checking the mode** — reposphere indexes the committed tree, so in `main`
+  mode (dirty working copy) its call-graph answers reflect pre-edit state; local `git diff` is the change-scope authority.
 - **Write errors are evidence, not a retry signal.** On an error, stop and surface it verbatim with the `executionId`.
 
 ## Next step
