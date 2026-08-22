@@ -2,6 +2,7 @@
 name: create-spec
 description: "Use after RCA investigation when ready to generate the fix specification and validation plan for a ticket. Triggers on: create spec, generate fix plan, spec for ticket, how to fix GEN-XXXX, full spec package, create all artifacts."
 argument-hint: "Jira ticket key (e.g. GEN-1662)"
+disable-model-invocation: true
 ---
 
 # Create Spec

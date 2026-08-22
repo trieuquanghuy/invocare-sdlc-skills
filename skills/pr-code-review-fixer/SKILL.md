@@ -2,6 +2,7 @@
 name: pr-code-review-fixer
 description: Apply fixes for pull request review comments with strict logic preservation. Use this skill whenever the user asks to address, fix, apply, resolve, triage, or process PR review comments, reviewer feedback, code review suggestions, or automated review output — even if they only describe the situation ("we have 20 review comments to address", "the bot left a bunch of comments on my PR", "fix the findings from the pr-reviewer agent") without explicitly asking for help. The skill accepts three input sources: a GitHub PR (number/URL/branch), a manager-hub CUID, or a local `code-review-result.json` produced by the in-repo `pr-reviewer` agent. Especially important in this InvoCare FireHawk / Barndoor workspace because behavior is often steered by Firebase RTDB config rather than code, and ~30 sibling repos can be silently affected by a "local" edit. The skill enforces minimal surgical edits, runs evidence-gathering MCPs (reposphere, firebase-explorer, code-lessons) before classifying each comment, classifies every comment into safe-to-fix vs. escalation-required buckets, and treats refusal as a first-class outcome rather than a fallback.
 argument-hint: "<pr-id-or-url-or-json-path> [--dry-run] [--bucket=cosmetic|local_guard] [--comment-ids=1,2,3|F1,F2]"
+disable-model-invocation: true
 ---
 
 # pr-code-review-fixer

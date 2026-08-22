@@ -1,45 +1,73 @@
 # InvoCare SDLC Skills
 
-Shared Claude Code skill set for the InvoCare / FireHawk (Barndoor) workflow — skills, rules, subagents, and the layer-2 SDLC gate hook. This repo is the **source of truth**; `main` is always current.
+Shared Claude Code and GitHub Copilot governance for the InvoCare / FireHawk workflow: skills, rules, agents, templates, and SDLC hooks.
 
-> The repo root **is** the contents of a `.claude/` directory (it maps straight into a workspace's `.claude/`). The shared rules live in `.claude/rules/`; the installer generates a small managed block of `@`-imports in the **workspace-root** `CLAUDE.md` (a sibling of `.claude/`) to load them — no symlink, and your own `CLAUDE.md` content is preserved.
+The repository's shared payload maps to a workspace `.claude` directory. The installer maintains the shared-rule imports in the workspace-root `CLAUDE.md` without replacing personal content.
 
----
+## Quick start
 
-## Which guide do I need?
+### Reproducible install (recommended for production and onboarding)
 
-| You want to… | Go to | Clone? |
-|---|---|---|
-| **Set up from scratch** (new member) | [`ONBOARDING.md`](ONBOARDING.md) | no |
-| **Install / update the skills** | [`ONBOARDING.md`](ONBOARDING.md) (steps 2 & 5) | no |
-| **Change a skill and open a PR** | [`CONTRIBUTING.md`](CONTRIBUTING.md) | yes |
-| **Sync workspace `.claude/` edits up into your clone** | [`CONTRIBUTING.md`](CONTRIBUTING.md) ("Sync your `.claude/` edits up into the clone") | yes |
+Pin a published CalVer tag for a reproducible installation. Use the latest published tag — for example `v2026.08.22`:
 
-In short: **consumers never clone** — one script (`update-skills.sh`) installs and updates, and is safe to re-run. **Contributors clone**, use `contribute-skills.sh` to push their workspace `.claude/` edits up into the clone (one way), then open PRs. The full commands live in the two guides above; this page is the map.
+```bash
+cd <workspace>
+curl -fsSL https://raw.githubusercontent.com/trieuquanghuy/invocare-sdlc-skills/main/tools/sync/remote-to-workspace.sh \
+  | bash -s -- --ref v2026.08.22
+```
 
----
+Replace `v2026.08.22` with the latest published tag. Tags are immutable: the same ref always installs the same content.
 
-## What's shared vs personal (the fence)
+### Current channel (updates)
 
-`.gitignore` is the boundary. **Shared** (tracked, synced): `rules/`, `skills/` (incl. `skills/_shared/skill-pipeline-process.md`), `agents/`, `scripts/`. The workspace-root `CLAUDE.md` is **generated** by the installer from `rules/` (a managed block), not shipped or synced. **Personal / per-machine** (never tracked, never synced): `settings.local.json`, `.mcp.json`, and any personal skills you keep under `skills/_local/`.
+Use `main` to pull the latest shared content:
 
-The consumer updater honors this fence: it never writes `settings.local.json` / `.mcp.json` / `skills/_local/`, and never deletes — overwrites are backed up to `.claude/.update-backup-<timestamp>/`.
+```bash
+cd <workspace>
+curl -fsSL https://raw.githubusercontent.com/trieuquanghuy/invocare-sdlc-skills/main/tools/sync/remote-to-workspace.sh | bash
+```
 
----
+After installation, create untracked `.claude/settings.local.json` and `.mcp.json` files using the installed examples and values from the approved credential channel. Merge the shared hooks fragment (see [Shared hooks](#shared-hooks) below), install `jq` for the SDLC hooks, then open Claude Code and confirm `/` lists the shared skills.
 
-## Versioning & recovery
+## Guides
 
-- **Version log:** git history — `git log` / `git log --oneline` is the change record (versions live in git, not a separate file).
-- **Release points:** CalVer tags, e.g. `v2026.06.01`. Pin an install by running it from your workspace root with `--ref v2026.06.01` (the workspace defaults to the current directory; or pass a path explicitly: `update-skills.sh <workspace> --ref v2026.06.01`).
-- **Recover from a bad update — three ways:**
-  1. **Local:** restore from `.claude/.update-backup-<timestamp>/` (instant, per-machine).
-  2. **Team-wide:** a contributor runs `git revert <sha>` and pushes the fix; consumers re-run `update-skills.sh`.
-  3. **Whole-set rollback:** re-install with an older tag, `--ref v2026.06.01`.
+- [`SYNC.md`](SYNC.md) — all source-to-target synchronization commands and recovery
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — changing shared governance
+- [`HOW-TO-USE.md`](HOW-TO-USE.md) — ticket lifecycle map
 
----
+## Ownership
 
-## Notes / limitations
+`shared-manifest.txt` is the synchronization allowlist. Shared content includes `rules/`, `skills/`, `agents/`, `scripts/`, and `HOW-TO-USE.md`.
 
-- The consumer sync has no `--delete`: if a shared skill is *retired* from the repo, consumers keep a stale local copy until they remove it by hand.
-- The one-line `curl … | bash` install runs a remote script unreviewed. If you'd rather read before running, download `update-skills.sh` first, skim it, then run it locally — and pin a CalVer tag with `--ref v2026.06.01` (see Versioning) instead of `main` for a reproducible install.
-- Plugins/marketplace were considered but can't carry the `@`-imported rules + the root-`CLAUDE.md` activation, so this clone/tarball model is used instead — it delivers the rules too.
+These remain local and are never synchronized:
+
+- `.claude/settings.local.json`
+- workspace `.mcp.json`
+- `.claude/skills/_local/`
+
+Synchronization is one-way. Versions live in git history; published CalVer tags such as `v2026.08.22` are immutable reproducible install points.
+
+## Shared hooks
+
+The installer distributes hook scripts to `.claude/hooks/` and writes a reference settings fragment to `.claude/hooks/settings.json`. **Sync never overwrites your personal `.claude/settings.local.json`.**
+
+To activate the shared hooks, manually merge the `hooks` entries from `.claude/hooks/settings.json` into your personal `.claude/settings.local.json`. A template with merge instructions is installed at `.claude/settings.local.json.example`.
+
+Example — merging the shared hooks with a personal `sdlc-gate` hook:
+
+```jsonc
+// .claude/settings.local.json
+{
+  "hooks": {
+    "PreToolUse": [
+      // shared hooks from .claude/hooks/settings.json
+      { "matcher": "Read|Grep|Glob|Bash", "hooks": [{ "type": "command", "command": ".claude/hooks/block-confidential.sh", "timeout": 5 }] },
+      { "matcher": "Edit|Write|MultiEdit", "hooks": [{ "type": "command", "command": ".claude/hooks/check-lessons-fetched.sh", "timeout": 5 }] },
+      // personal hook
+      { "matcher": "Edit|Write|MultiEdit", "hooks": [{ "type": "command", "command": ".claude/hooks/sdlc-gate.sh", "timeout": 10 }] }
+    ]
+  }
+}
+```
+
+If a sync run overwrites a hook script, restore it by running the same `remote-to-workspace` command (with `--ref <tag>` to pin the version) or by copying from the backup the installer creates under `.claude/.update-backup-<timestamp>`.

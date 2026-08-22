@@ -4,7 +4,7 @@
 >
 > **You do not need to read this file.** It is the driver's source of truth, and it is long because it carries every
 > gotcha and server bug found on real runs. The skill (`../SKILL.md`) reads it for you. Run `/code-review-kms <PR>` and
-> follow the prompts. Step-by-step walkthrough for a first run: `HOW-TO-USE.md` → *AI code review on a PR*.
+> follow the prompts. The repository `HOW-TO-USE.md` lifecycle map shows where review fits.
 >
 > **Read this file yourself only when** a run behaves unexpectedly, you are changing the procedure, or you want to know
 > *why* a gate exists before approving it.

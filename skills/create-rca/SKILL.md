@@ -2,6 +2,7 @@
 name: create-rca
 description: "Use when investigating a Jira ticket (bug or feature story) to produce an RCA at tickets/{KEY}/rca.md. Symptoms: ticket key like GEN-XXXX or FIR-XXXX, request to analyze root cause, investigate broken behavior, or gap-analyze a feature story before spec."
 argument-hint: "Jira ticket key (e.g. GEN-2759) or describe the issue"
+disable-model-invocation: true
 ---
 
 # Create RCA
