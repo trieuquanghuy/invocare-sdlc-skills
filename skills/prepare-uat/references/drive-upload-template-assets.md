@@ -54,19 +54,27 @@ Parse the response per the apply-fix Step 4h conventions:
    - Write the `template_assets_parent_folder_id` key into `drive.json` (merge with existing keys; never overwrite the file blindly). Tell the user `Saved. Future prepare-uat runs will pre-fill this folder.`.
    - Continue to Step 6.5.ii.
 
-## Step 6.5.ii — Detect existing files and handle collisions per template
+## Step 6.5.ii — Detect existing files and handle collisions in one batch
 
-For each template artifact (T1, T2, …) and each file (twig, css), the upload name is the source filename verbatim: `{Name}.twig` or `{Name}.css`. Search for any existing file with that exact name in the parent folder:
+For each template artifact (T1, T2, …) and each file (twig, css), the upload name is the source filename verbatim: `{Name}.twig` or `{Name}.css`. Issue ALL collision checks **in one parallel turn** — one `search_files` call per filename, sent together, never sequentially:
 
 ```
 search_files(query: "name = '{Name}.{ext}' and '{parent_folder_id}' in parents and trashed = false")
 ```
 
-| Existing files | Behaviour |
-|---|---|
-| 0 | Proceed to upload (fresh). |
-| 1 | Surface: `Drive already has a file named "{Name}.{ext}" (id: <existing_id>, modified <date>). The Drive MCP cannot replace or version-update — uploading creates a duplicate with the same name. Choose: (replace — I will rename the old file manually after / keep-both / skip-this-file).` Wait. On `skip-this-file`, record the existing file id + URL in the deploy file's Template Artifacts row and move on. On `replace` or `keep-both`, proceed to upload. |
-| 2+ | Surface: `Multiple files named "{Name}.{ext}" already exist in the Drive folder. Manual cleanup recommended. Continue and create another duplicate? (yes / no)`. On `no`, record `Drive mirror: ambiguous — {N} duplicates already in folder; cleanup needed` in the Template Artifacts row and skip this file. |
+Then present ONE consolidated collision prompt covering every file — never per-file prompts:
+
+```
+Drive collision check ({N} files):
+  fresh (will upload):      {Name1}.twig, {Name1}.css
+  1 existing duplicate:     {Name2}.twig (id: <existing_id>, modified <date>)
+  2+ duplicates (cleanup):  {Name3}.css ({K} copies)
+
+The Drive MCP cannot replace or version-update — uploading creates a duplicate with the same name.
+For each colliding file, reply: replace (I will rename the old file manually after) / keep-both / skip — e.g. `{Name2}.twig: replace, {Name3}.css: skip`.
+```
+
+Per-file resolution: fresh files proceed to upload. On `skip` for a 1-duplicate file, record the existing file id + URL in the deploy file's Template Artifacts row and move on. On `replace` or `keep-both`, proceed to upload. On `skip` for a 2+-duplicates file, record `Drive mirror: ambiguous — {N} duplicates already in folder; cleanup needed` in the Template Artifacts row.
 
 ## Step 6.5.iii — Upload each file
 

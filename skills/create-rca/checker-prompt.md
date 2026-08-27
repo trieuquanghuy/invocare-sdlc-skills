@@ -6,6 +6,8 @@ You are a verification subagent for the InvoCare `create-rca` skill. Your job is
 > **Source rubric:** Quality Bar in `.claude/skills/create-rca/SKILL.md` — keep this rubric in sync with that section.
 > **Output shape:** canonical `verdict + gaps[]` PLUS the RCA-specific `readiness` extension. `readiness` captures whether the investigation has open questions even when `verdict=PASS`. The legacy `quality` field is deprecated and MUST NOT be emitted.
 
+Apply `.claude/rules/output-guardian.md` and `.claude/rules/secrets-safety.md` to all output you produce.
+
 ## Inputs (from the dispatch prompt)
 
 - Path to the draft rca.md (or its full content inlined)
@@ -50,10 +52,11 @@ You are a verification subagent for the InvoCare `create-rca` skill. Your job is
 - **FAIL** if any match
 - **Fixable**: YES — remove the URL, replace with the path string
 
-### Q6: Template structure followed exactly
-- Compare rca.md headings to the section headings in `references/rca-template.md`
-- **FAIL** if any required template section is missing
-- **Fixable**: YES — add the missing section header. If body content for the section can be inferred from existing draft text, fill it; otherwise add a placeholder line and emit a separate `fixable: false` gap so it's flagged.
+### Q6: Template structure followed (CORE/CONDITIONAL tiering)
+- Compare rca.md headings to the section headings in `references/rca-template.md`. The template's IMPORTANT RULES block defines which sections are CORE (always required) and which are CONDITIONAL (marked inline).
+- **FAIL** if any CORE section is missing
+- A missing CONDITIONAL section is a PASS (omission is the correct behavior when it has no real content). **FAIL instead** if a CONDITIONAL section is present but padded with filler — `n/a` rows, placeholder rows, or "Not involved" rows — it should have been omitted.
+- **Fixable**: YES — for a missing CORE section, add the header and fill from existing draft text if inferable (else placeholder + separate `fixable: false` gap). For a padded CONDITIONAL section, delete the section.
 
 ### Q7: Existing RCA currency classified: `CURRENT` / `PARTIALLY_STALE` / `OUTDATED`
 - Required only if Step 0b ran (existing RCA was verified rather than written fresh)
@@ -79,7 +82,7 @@ You are a verification subagent for the InvoCare `create-rca` skill. Your job is
 
 ### Q12: Stakeholder claims from comments verified or surfaced as Open Questions
 - Scan rca.md Status History, Executive Summary, and Section 3 for assertions attributed to a reporter, assignee, or commenter of the shape "X exists" / "N records of X" / "Y works like Z" / "the integration already exists" / "we use M default values" / "the count is K". These are stakeholder claims — useful inputs, but not yet evidence.
-- **PASS** if every such claim either (a) has a corresponding Evidence row that confirms or refutes it with live data, OR (b) is surfaced as an `## Open Questions` entry that quotes the claim and names the resolution path (re-query, ask user, fetch attachment).
+- **PASS** if every such claim either (a) has a corresponding Evidence row that confirms or refutes it with live data, (b) is cited as an attributed stakeholder claim (`per {role}, {date} comment`) where a Jira comment already answers the point and the claim is not load-bearing for the fix, OR (c) is surfaced as an `## Open Questions` entry that quotes the claim and names the resolution path (re-query, ask user, fetch attachment). The arms are alternatives — a claim satisfied by (a) or (b) must NOT also appear as an Open Question.
 - **FAIL** otherwise. Severity: `warning` (not blocker — stakeholder claims sometimes ARE the legitimate spec input, but they must be marked as such rather than absorbed into the RCA as fact).
 - **Fixable**: YES — for each unverified claim, append an Open Question entry quoting the claim and naming the resolution path.
 - This rule also feeds Readiness: an unverified stakeholder claim without an Open Question entry triggers `readiness: UNRESOLVED` (see Readiness rules below).
@@ -101,7 +104,7 @@ Run on every RCA whose root cause classification (Section 3.1 of rca.md) is one 
 Stories assert two kinds of things bugs don't: "X exists in the current system" (a schema field, a code symbol, a populated collection) and "Y is missing" (the gap). Each kind gets one spot-check.
 
 1. **Existing-state claim.** Pick one Evidence row that asserts something *exists* in the current system (a schema field, a code function, a populated record count). Re-verify it: either re-query the stated DB tool, OR re-grep the codebase with one alternate keyword (e.g. if the row claims a function `getX` exists at file Y, grep for both the exact symbol AND a semantic neighbour — a `get.*X` pattern or the containing directory). If the live state contradicts the row, emit a gap with `rule: "Spot-check — Existing-state fabrication"`, `severity: blocker`, `fixable: false`, `issue: "Row claims X exists but re-verification shows otherwise: <detail>"`, `suggested_fix: null`.
-2. **Missing-state claim.** Pick one Gap row from Section 3.1 that asserts something *does not exist* (a schema field that's absent, an integration that no grep matches, a code path that returns no results). Re-grep with **at least 2 keyword variants** — the exact term plus one semantic neighbour (e.g. if a gap claims a third-party integration is "not found" via one product name, also grep an adjacent product name AND a structural pattern such as the matching route or controller stem). If a variant returns hits the gap doesn't acknowledge, emit a gap with `rule: "Spot-check — Missing-state under-searched"`, `severity: blocker`, `fixable: false`, `issue: "Gap claims X is missing but variant search '<keyword>' returned <hit>"`, `suggested_fix: null`.
+2. **Missing-state claim.** Pick one Gap row from Section 7.5 Gap Analysis (or Section 3.1 if the RCA predates the 7.5 split) that asserts something *does not exist* (a schema field that's absent, an integration that no grep matches, a code path that returns no results). Re-grep with **at least 2 keyword variants** — the exact term plus one semantic neighbour (e.g. if a gap claims a third-party integration is "not found" via one product name, also grep an adjacent product name AND a structural pattern such as the matching route or controller stem). If a variant returns hits the gap doesn't acknowledge, emit a gap with `rule: "Spot-check — Missing-state under-searched"`, `severity: blocker`, `fixable: false`, `issue: "Gap claims X is missing but variant search '<keyword>' returned <hit>"`, `suggested_fix: null`.
 
 ### Both tracks
 
@@ -119,7 +122,10 @@ Mark `readiness: "UNRESOLVED"` if ANY of the following hold:
 
 If none apply: `readiness: "CLEAR"`.
 
-For each UNRESOLVED condition, ALSO emit a gap with `rule: "Open Question — <short title>"`, `severity: warning`, `fixable: false`, `issue: <the question phrased as a question>`, `suggested_fix: null`. The dispatching skill aggregates these into a `## Open Questions` section in the saved rca.md.
+For each UNRESOLVED condition, ALSO emit a gap with `rule: "Open Question — <short title>"`, `severity: warning`, `fixable: false`, `issue: <the question phrased as a question>`, `suggested_fix: null` — but ONLY after applying the Open Questions triage gate from SKILL.md Step 7's aggregation rules: skip the gap when the Jira comments or Evidence rows already answer the point, when the answer does not block this ticket's spec/fix (adjacent anomaly, nice-to-know), or when the item is a tracked dependency belonging in 3.2. The dispatching skill aggregates the surviving gaps into a `## Open Questions` section in the saved rca.md.
+
+### OQ-noise check (reverse direction)
+Also walk any `## Open Questions` section already in the draft. For each entry, emit a gap with `rule: "OQ noise — <short title>"`, `severity: warning`, `fixable: true`, when the entry (a) is answered by a Jira comment or an Evidence row in the same draft, (b) does not block this ticket's spec or fix, or (c) duplicates a 3.2 Dependencies row / has a named owner elsewhere. `suggested_fix`: where the content should go instead (cited stakeholder claim, Dependencies row, Follow-ups line, or plain deletion).
 
 ## Verdict logic
 

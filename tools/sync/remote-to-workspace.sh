@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# update-skills.sh — install or update the InvoCare shared skills in a workspace .claude/.
+# remote-to-workspace.sh — install or update remote shared content in workspace .claude/.
 #
 # ONE command, no clone, no GitHub auth (the repo is public — fetched over plain https).
 # Run it the first time to install, re-run anytime to update. Idempotent.
 #
 # Quickest path — cd into the workspace, then run with NO arguments (workspace = current dir):
 #   cd <your-workspace>
-#   curl -fsSL https://raw.githubusercontent.com/trieuquanghuy/invocare-sdlc-skills/main/update-skills.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/trieuquanghuy/invocare-sdlc-skills/main/tools/sync/remote-to-workspace.sh | bash
 #
 # Or pass a path / flags explicitly (when piping, flags go after `-s --`):
-#   ./update-skills.sh [path-to-workspace] [--dry-run] [--ref <branch|tag>] [--force]
+#   ./tools/sync/remote-to-workspace.sh [path-to-workspace] [--dry-run] [--ref <branch|tag>] [--force]
 #
 #   --dry-run   show what would change; write nothing (recommended on first run)
 #   --ref <x>   install a specific branch or CalVer tag (default: main)
@@ -20,8 +20,8 @@
 # (recorded in .claude/.skills-sync-state); on a match it prints "already up to date" and
 # exits without downloading. Otherwise it makes .claude/ match the repo's shared set, backs
 # up any file it overwrites, never deletes, and never touches your settings.local.json /
-# .mcp.json / skills/_local/. On first install it also drops the *.example config templates
-# into .claude/ so you can create your own settings.local.json + .mcp.json.
+# .mcp.json / skills/_local/. On first install it also places the *.example templates beside
+# their target config files so you can create your own settings.local.json + .mcp.json.
 #
 # Requires: curl, tar, rsync (all preinstalled on macOS). gh is only a fallback.
 set -euo pipefail
@@ -44,6 +44,14 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+if [[ ! "$REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+  echo "error: invalid ref: use letters, numbers, dots, underscores, slashes, or hyphens." >&2
+  exit 1
+fi
+case "/$REF/" in
+  *"/../"*) echo "error: invalid ref: parent path segments are not allowed." >&2; exit 1 ;;
+esac
+
 # No workspace given? default to the current directory — cd into your workspace and run.
 WS="${WS:-$PWD}"
 if ! WS_ABS="$(cd "$WS" 2>/dev/null && pwd)"; then
@@ -58,7 +66,9 @@ trap 'rm -rf "$TMP"' EXIT
 
 echo "Repo:      $OWNER_REPO @ $REF (public)"
 echo "Workspace: $WS"
-echo "Mode:      ${DRY:+DRY-RUN (no changes written)}${DRY:-apply}"
+MODE_LABEL="apply"
+[ -n "$DRY" ] && MODE_LABEL="DRY-RUN (no changes written)"
+echo "Mode:      $MODE_LABEL"
 echo
 
 # 0. Up-to-date check. Resolve the ref's latest commit SHA (cheap — no tarball) and compare
@@ -119,54 +129,151 @@ tar -xzf "$TGZ" -C "$TMP/x" --strip-components=1   # drop the wrapper dir (owner
 
 # 2. Sync the SHARED payload into .claude/.
 #    The shared set is read from shared-manifest.txt (the SINGLE SOURCE OF TRUTH, also
-#    read by contribute-skills.sh — one list, no "keep the two in sync" coupling). It is
+#    read by workspace-to-checkout.sh — one list, no "keep the two in sync" coupling). It is
 #    an ALLOWLIST: only the listed top-level items are synced, so a new repo file is never
 #    shipped to consumers until it's added to the manifest. A built-in default covers an
 #    older tarball that predates the manifest.
 #    -c (checksum) avoids spurious backups from the tarball's fresh extract mtimes;
 #    --backup keeps every overwritten file; NO --delete, so personal skills survive.
-mkdir -p "$WS/.claude"
+[ -n "$DRY" ] || mkdir -p "$WS/.claude"
 TS="$(date +%Y%m%d-%H%M%S)"
 BK="$WS/.claude/.update-backup-$TS"
 
-SHARED_DEFAULT="rules agents scripts skills HOW-TO-USE.md"
+# Parse the shared manifest into an array so each entry is treated as a literal
+# token — no word-splitting artefacts, no glob expansion, spaces in paths are safe.
+SHARED_DEFAULT=(rules agents scripts skills HOW-TO-USE.md)
+SHARED_ITEMS=()
 if [ -f "$TMP/x/shared-manifest.txt" ]; then
-  SHARED="$(grep -vE '^[[:space:]]*(#|$)' "$TMP/x/shared-manifest.txt" | tr '\n' ' ')"
+  while IFS= read -r _line; do
+    # strip leading/trailing whitespace, skip blank lines and comments
+    _line="${_line#"${_line%%[! ]*}"}"
+    _line="${_line%"${_line##*[! ]}"}"
+    case "$_line" in ''|'#'*) continue ;; esac
+    SHARED_ITEMS+=( "$_line" )
+  done < "$TMP/x/shared-manifest.txt"
+  [ "${#SHARED_ITEMS[@]}" -gt 0 ] || SHARED_ITEMS=( "${SHARED_DEFAULT[@]}" )
 else
-  SHARED="$SHARED_DEFAULT"
+  SHARED_ITEMS=( "${SHARED_DEFAULT[@]}" )
 fi
 
 # Pass each shared item as its own source (no trailing slash) so overwritten files keep
 # their path prefix under the backup dir (e.g. rules/x.md -> $BK/rules/x.md). Skip items
 # missing from the tarball instead of letting rsync abort under set -e.
 SRCS=()
-for item in $SHARED; do
+for item in "${SHARED_ITEMS[@]}"; do
   [ -e "$TMP/x/$item" ] && SRCS+=( "$TMP/x/$item" )
 done
 [ "${#SRCS[@]}" -gt 0 ] || { echo "error: nothing to sync — manifest empty or items missing from tarball." >&2; exit 1; }
+for source in "${SRCS[@]}"; do
+  link="$(find "$source" -type l -print -quit)"
+  [ -z "$link" ] || {
+    echo "error: source symlink is not allowed: $link" >&2
+    exit 1
+  }
+done
+# Check for symlinks in hook sources (explicit mapping — layout differs from .claude/).
+HOOK_SCRIPTS_SRC="$TMP/x/hooks/hooks"
+HOOK_SETTINGS_SRC="$TMP/x/hooks/settings.json"
+for _hsrc in "$HOOK_SCRIPTS_SRC" "$HOOK_SETTINGS_SRC"; do
+  [ -e "$_hsrc" ] || continue
+  _hlink="$(find "$_hsrc" -type l -print -quit)"
+  [ -z "$_hlink" ] || {
+    echo "error: source symlink is not allowed: $_hlink" >&2
+    exit 1
+  }
+done
 
 echo "Updating $WS/.claude/ …"
+# In dry-run mode, GNU rsync (Linux) exits with code 3 when the destination
+# directory does not yet exist.  Shadow nonexistent destinations to a temporary
+# directory so --dry-run can still traverse and report what would change without
+# touching the workspace.  When the real destination already exists we compare
+# against it directly, keeping update-reporting accurate.
+_dry_dest() {
+  local real="$1" shadow_name="$2"
+  if [ -n "$DRY" ] && [ ! -d "$real" ]; then
+    local sd="$TMP/$shadow_name"
+    mkdir -p "$sd"
+    printf '%s' "$sd/"
+  else
+    printf '%s' "$real/"
+  fi
+}
+CLAUDE_DEST="$(_dry_dest "$WS/.claude" "shadow-claude")"
 RAW="$(rsync -ac --itemize-changes $DRY \
   --backup --backup-dir="$BK" \
   --exclude 'skills/_local/***' \
-  "${SRCS[@]}" "$WS/.claude/")"
+  "${SRCS[@]}" "$CLAUDE_DEST")"
+# 2b. Install hooks with explicit mapping (hooks/ layout differs from .claude/ layout).
+#     hooks/hooks/* → .claude/hooks/*  (scripts land flat, not nested)
+#     hooks/settings.json → .claude/hooks/settings.json  (reference fragment; never settings.local.json)
+[ -n "$DRY" ] || mkdir -p "$WS/.claude/hooks"
+HOOK_RAW=""
+if [ -d "$HOOK_SCRIPTS_SRC" ]; then
+  HOOKS_DEST="$(_dry_dest "$WS/.claude/hooks" "shadow-hooks")"
+  HOOK_RAW="$(rsync -ac --itemize-changes $DRY \
+    --backup --backup-dir="$BK" \
+    "$HOOK_SCRIPTS_SRC/" "$HOOKS_DEST")"
+fi
+HOOK_SETTINGS_RAW=""
+if [ -f "$HOOK_SETTINGS_SRC" ]; then
+  if [ -n "$DRY" ] && [ ! -d "$WS/.claude/hooks" ]; then
+    # shadow-hooks may not have been created yet if HOOK_SCRIPTS_SRC was absent.
+    mkdir -p "$TMP/shadow-hooks"
+    _settings_shadow="$TMP/shadow-hooks/settings.json"
+    HOOK_SETTINGS_RAW="$(rsync -ac --itemize-changes $DRY \
+      --backup --backup-dir="$BK" \
+      "$HOOK_SETTINGS_SRC" "$_settings_shadow")"
+  else
+    HOOK_SETTINGS_RAW="$(rsync -ac --itemize-changes $DRY \
+      --backup --backup-dir="$BK" \
+      "$HOOK_SETTINGS_SRC" "$WS/.claude/hooks/settings.json")"
+  fi
+fi
 # Show only real content changes — new files (code has +++++++) and updated files (>f…) —
 # labelled new / updated; drop directories and metadata-only churn (mtime/perms) that's just noise.
-CHANGES="$(printf '%s\n' "$RAW" | grep -E '^[<>]f' \
+ALL_RAW="$RAW
+$HOOK_RAW
+$HOOK_SETTINGS_RAW"
+CHANGES="$(printf '%s\n' "$ALL_RAW" | grep -E '^[<>]f' \
   | sed -E 's/^[<>]f[^ ]*\+\+\+\+\+\+\+ /  new      /; s/^[<>]f[^ ]* /  updated  /' || true)"
 NEW_N="$(printf '%s\n' "$CHANGES" | grep -c '^  new ' || true)"
 UPD_N="$(printf '%s\n' "$CHANGES" | grep -c '^  updated ' || true)"
 [ -n "$CHANGES" ] && printf '%s\n' "$CHANGES"
+
+# First install provides shape references without overwriting local examples on later runs.
+install_example() {
+  source_path="$1"
+  destination="$2"
+  [ -f "$source_path" ] && [ ! -e "$destination" ] || return 0
+  if [ -n "$DRY" ]; then
+    echo "  would create ${destination#"$WS/"}"
+  else
+    cp "$source_path" "$destination"
+    echo "  created ${destination#"$WS/"}"
+  fi
+}
+install_example "$TMP/x/settings.local.json.example" "$WS/.claude/settings.local.json.example"
+install_example "$TMP/x/.mcp.json.example" "$WS/.mcp.json.example"
 
 # 3. Maintain the workspace-ROOT CLAUDE.md (sibling of .claude/) so Claude Code loads the
 #    shared rules natively — no symlink. We manage ONLY a marked block of @-imports built from
 #    the installed rules/*.md; anything OUTSIDE the markers (your own content) is preserved.
 #    Re-runs refresh the block, so new rules are picked up automatically.
 if [ -z "$DRY" ]; then
-  BEGIN='<!-- invocare-skills:begin (managed by update-skills.sh — do not edit inside) -->'
+  BEGIN='<!-- invocare-skills:begin (managed; do not edit inside) -->'
+  LEGACY_BEGIN='<!-- invocare-skills:begin (managed by update-skills.sh — do not edit inside) -->'
   END='<!-- invocare-skills:end -->'
   ROOT_MD="$WS/CLAUDE.md"
   BLOCKFILE="$TMP/claude-block"
+  MANAGED_BEGIN=""
+  if [ ! -L "$ROOT_MD" ] && [ -f "$ROOT_MD" ]; then
+    if grep -qF "$BEGIN" "$ROOT_MD" && grep -qF "$END" "$ROOT_MD"; then
+      MANAGED_BEGIN="$BEGIN"
+    elif grep -qF "$LEGACY_BEGIN" "$ROOT_MD" && grep -qF "$END" "$ROOT_MD"; then
+      MANAGED_BEGIN="$LEGACY_BEGIN"
+    fi
+  fi
   {
     printf '%s\n' "$BEGIN"
     for f in "$WS"/.claude/rules/*.md; do
@@ -179,10 +286,16 @@ if [ -z "$DRY" ]; then
     # Legacy install left a symlink — replace it with a real managed file.
     rm -f "$ROOT_MD"; cp "$BLOCKFILE" "$ROOT_MD"
     echo "  CLAUDE.md: replaced the old symlink with a managed rules block"
-  elif [ -f "$ROOT_MD" ] && grep -qF "$BEGIN" "$ROOT_MD"; then
+  elif [ -n "$MANAGED_BEGIN" ]; then
     # Managed block already present — refresh it in place, keep everything else.
-    awk -v bf="$BLOCKFILE" -v b="$BEGIN" -v e="$END" '
-      $0==b { while ((getline l < bf) > 0) print l; close(bf); skip=1; next }
+    awk -v bf="$BLOCKFILE" -v b="$MANAGED_BEGIN" -v e="$END" '
+      $0==b && !replaced {
+        while ((getline l < bf) > 0) print l
+        close(bf)
+        skip=1
+        replaced=1
+        next
+      }
       skip && $0==e { skip=0; next }
       !skip { print }
     ' "$ROOT_MD" > "$ROOT_MD.tmp" && mv "$ROOT_MD.tmp" "$ROOT_MD"
@@ -201,13 +314,18 @@ fi
 #    the download when the remote hasn't moved, and the file list to detect locally-deleted
 #    files (a removed skill) so it re-syncs to restore them instead of short-circuiting.
 #    Real apply only, with a known SHA. Both files are per-machine state — gitignored and
-#    excluded from contribute-skills.sh, so they never cross into the repo. The manifest lists
+#    excluded from workspace-to-checkout.sh, so they never cross into the repo. The manifest lists
 #    only repo-provided files (generated from the tarball), so rsync can always restore them.
 if [ -z "$DRY" ] && [ -n "$REMOTE_SHA" ]; then
   printf '%s %s\n' "$REF" "$REMOTE_SHA" > "$STAMP"
-  ( cd "$TMP/x" 2>/dev/null && for item in $SHARED; do
+  ( cd "$TMP/x" 2>/dev/null && for item in "${SHARED_ITEMS[@]}"; do
       [ -e "$item" ] && find "$item" -type f
     done ) 2>/dev/null | grep -v '^skills/_local/' > "$MANIFEST" || true
+  # Append hook files (explicit mapping: hooks/hooks/* → hooks/*, hooks/settings.json → hooks/settings.json).
+  if [ -d "$HOOK_SCRIPTS_SRC" ]; then
+    ( cd "$HOOK_SCRIPTS_SRC" && find . -type f | sed 's|^\./|hooks/|' ) >> "$MANIFEST" 2>/dev/null || true
+  fi
+  [ -f "$HOOK_SETTINGS_SRC" ] && echo "hooks/settings.json" >> "$MANIFEST" || true
 fi
 
 echo

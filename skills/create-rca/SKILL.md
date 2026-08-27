@@ -2,11 +2,16 @@
 name: create-rca
 description: "Use when investigating a Jira ticket (bug or feature story) to produce an RCA at tickets/{KEY}/rca.md. Symptoms: ticket key like GEN-XXXX or FIR-XXXX, request to analyze root cause, investigate broken behavior, or gap-analyze a feature story before spec."
 argument-hint: "Jira ticket key (e.g. GEN-2759) or describe the issue"
+disable-model-invocation: true
 ---
 
 # Create RCA
 
 Produce an RCA document for a Jira ticket following the team's standard format — used for both bugs and feature stories. Output goes to `tickets/{TICKET_KEY}/rca.md`.
+
+**Focus:** the RCA answers exactly two questions — *where does the issue come from* and *what is the issue* (evidence-backed analysis). How to fix it belongs in `spec.md`; deployment/communication belongs in the comment. Anything in rca.md that doesn't serve those two questions is noise.
+
+**Revision semantics — update in place, never accumulate.** When a re-run (new finding, or a previous fix turned out wrong) changes the analysis: rewrite the affected sections so the document reads as the current truth. Do NOT append "Update:"/"Correction:" blocks, keep superseded root-cause text alongside the new one, or add a change-narrative — the git history and Jira carry the story; rca.md carries only the present analysis. A corrected RCA should look as if it had been written correctly the first time.
 
 **The local `rca.md` must reflect the CURRENT state of the system.** Analyses written by others may be outdated — always verify evidence against live Firebase data before using it for `create-spec` or `apply-fix`.
 
@@ -20,7 +25,7 @@ Produce an RCA document for a Jira ticket following the team's standard format �
 
 ## NOT This Skill If
 
-The user wants to understand a feature's architecture or blast radius with no ticket attached — use `/impact-analysis` instead.
+The user wants to understand a feature's architecture or blast radius with no ticket attached — answer directly with reposphere (`search_with_context`, `graph_query` callers, `cross_repo_search`) instead.
 
 ---
 
@@ -167,6 +172,24 @@ Read enough code to confirm whether the behavior is a **code defect** or **confi
 
 ---
 
+## Step 4b: Investigation Stop Rule — enough evidence is enough
+
+The steps above say what to check; this says when to stop. An RCA is an evidence-backed answer to "why does the ticket's symptom happen" — not an audit of every layer the request passes through. (Baseline: `anti-overengineering.md` AO3.)
+
+**The stop condition:** every claim the RCA will make has one confirming Evidence row, and the root cause explains the full symptom (not just part of it). When that holds, stop querying and write. A second confirming source is warranted only when the evidence is conflicting (resolve per `engineering-conduct.md` EC7), the claim is load-bearing for a prod write, or a stakeholder claim needs independent confirmation (Q12).
+
+**Stop signals — each of these means write, escalate, or re-scope, not query again:**
+
+- **Config explains it fully.** If the behavior is config-following, confirm the one consumer honors that config and stop — do not audit the remaining layers of the Step 4 table "for completeness". Layers the symptom never touches don't belong in the Evidence table.
+- **Adjacent anomalies.** Something odd but unrelated to the symptom (a stale sibling config, a suspicious nearby function) gets one line in `## Open Questions`, not its own investigation branch. The RCA answers this ticket.
+- **Diminishing queries.** You've re-queried the same path, or reformulated the same search a third time, without new evidence. The fact is `not found` or `unconfirmed` — record it as an Open Question and move on (Q4).
+- **Hedge-resolution cap.** The readiness rule (no "likely"/"appears") is satisfied by resolving OR escalating. Spend at most ~2 targeted queries resolving a hedge; if it still won't lock down, `readiness: UNRESOLVED` with a precise Open Question is the *correct* output — not a failure to keep querying past.
+- **Ballooning scope.** The investigation has fanned out well past the ticket's stated surface (per `engineering-conduct.md` EC6): pause, summarize what's confirmed vs. open, and check direction with the user before continuing.
+
+**What this never trims:** the mandatory steps (0b currency check, DB-type per row, env matching, attachment guard, checker dispatch) and evidence honesty. The stop rule bounds *how far you dig*, never *how honestly you record*.
+
+---
+
 ## Step 5: Write the RCA
 
 Read [rca-template.md](./references/rca-template.md). Follow its section structure exactly for all ticket types (bugs and stories) — the nine numbered sections plus the unnumbered Sources Investigated, Executive Summary, and Open Questions sections.
@@ -192,7 +215,9 @@ Read [rca-template.md](./references/rca-template.md). Follow its section structu
 
 Skip this step for bug-track RCAs (`CONFIGURATION_GAP` / `CODE_DEFECT` / `DATA_MAPPING_GAP`). For stories, three additional disciplines apply on top of the Step 5 rules — a story's failure mode is silent under-investigation, not visible defect, so the rigor lives here rather than in the universal rubric.
 
-1. **Verify "existing state" before stating the gap.** A story RCA must not claim "X is missing" without first showing what IS in place. For every Gap row in Section 3.1, the Evidence Summary must include at least one paired row capturing the live state of the surrounding schema / code / collection — so the gap is anchored, not a misread. Example: claiming a new field is missing from a form schema requires an Evidence row enumerating the fields that DO exist at that schema path, not just a `not found` lookup of the new field's expected key.
+0. **Gap rows live in Section 7.5 Gap Analysis** (the story-only conditional section of the template): one row per requirement — required state, current state (evidence-anchored), gap. Section 3.1 states the overall root-cause narrative; 7.5 carries the row-by-row survey.
+
+1. **Verify "existing state" before stating the gap.** A story RCA must not claim "X is missing" without first showing what IS in place. For every Gap row in Section 7.5, the Evidence Summary must include at least one paired row capturing the live state of the surrounding schema / code / collection — so the gap is anchored, not a misread. Example: claiming a new field is missing from a form schema requires an Evidence row enumerating the fields that DO exist at that schema path, not just a `not found` lookup of the new field's expected key.
 
 2. **Every Gap row records its search.** When asserting absence ("does not exist", "not found", "no integration matches"), the Gap row must state both (a) what was searched and (b) which keyword / path / collection was used. A single grep with a single keyword does not satisfy a missing-state claim — use **≥2 keyword variants** (exact term + a semantic neighbour) and cite both. This is exactly what the checker spot-checks for stories under "Missing-state under-searched".
 
@@ -240,6 +265,14 @@ After drafting the RCA in memory (do not save yet), gate the artifact through th
    | PASS | UNRESOLVED | `readiness=UNRESOLVED` | append `## Open Questions` (format below), then save |
    | WARN | (any) | (treated as PASS) | save; surface warnings in the user summary |
    | FAIL (after 3 iters OR early-out on stuck gaps) | (any) | `quality=FAIL` | save + write `QUALITY-REPORT.md` |
+
+**Triage gate — run on every candidate question before it enters the section.** Open Questions are expensive: each one hard-blocks `create-spec` until resolved. A question earns its place only if ALL three hold:
+
+1. **Not already answered.** Re-check the Jira comments (already fetched in Step 1) and the RCA's own Evidence rows. If a comment answers it, the answer is a *stakeholder claim*: cite it (e.g. in 3.2 Dependencies or the relevant section) with `per {role}, {date} comment` and, when the claim is load-bearing for the fix, pair it with a confirming Evidence row per Q12 — but do NOT also raise it as a question. Q12's two arms are alternatives: an evidence-confirmed or comment-answered claim never becomes an Open Question on top.
+2. **Blocks THIS ticket's spec or fix.** If the spec can be written and applied without the answer, it is not an Open Question — an adjacent anomaly goes to `Follow-ups During the Fix` or a one-line note; a nice-to-know goes nowhere. Test: "would `create-spec` produce a wrong or incomplete spec without this answer?" If no, don't block it.
+3. **Actionable and addressed.** The entry names who can answer it (BA / reporter / DevOps / a query that hasn't been run) and what resolving it unblocks. "It is unclear whether…" with no resolution path is a hedge, not a question — resolve it (≤2 queries per Step 4b) or drop it.
+
+Tracked-elsewhere items are not Open Questions either: a dependency with a ticket or owner (e.g. "NZ data — DevOps") lives in 3.2 Dependencies, not here. When the gate empties the list, omit the section entirely — that is the common correct outcome, and `readiness` returns to CLEAR if no other UNRESOLVED condition remains.
 
 The `## Open Questions` block format when `readiness=UNRESOLVED`:
 
@@ -301,7 +334,7 @@ Then print the Next-step footer matching `final_classification` (see § Next ste
 - [ ] Firebase paths included for every evidence block
 - [ ] Missing data stated as `not found` — never guessed
 - [ ] No Firebase console links in output
-- [ ] Template structure followed exactly
+- [ ] Template structure followed: all CORE sections present; CONDITIONAL sections either carry real content or are omitted entirely (never filled with n/a or filler rows)
 - [ ] Existing RCA currency classified: `CURRENT` / `PARTIALLY_STALE` / `OUTDATED`
 - [ ] Environment used for Firebase queries matches ticket context
 - [ ] DB type (RTDB / Firestore) specified for every Firebase path in the Evidence table
@@ -342,7 +375,8 @@ If any of these thoughts surface, the next action is NOT what you were about to 
 | Inventing a synthetic field name to fill out an Evidence row when the real path returned empty. | Q4 — write `not found`, then add an Open Question requesting the real value. |
 | Stating the root cause tentatively ("the cause appears to be X"). | Triggers `readiness=UNRESOLVED`. Either run another query to lock it down, or escalate as an Open Question for the user. |
 | Including session ids or `firebase-explorer` references in the Status History section. | Q11. Status History is Jira transitions + real-world actions only — strip everything else. |
-| Dropping the "Steps to Reproduce" section because the bug "is obvious from the ticket title". | Template structure (Q6) — every required section must be present, even if brief. Use `n/a` only if genuinely not applicable. |
+| Dropping the "Steps to Reproduce" section because the bug "is obvious from the ticket title". | Template structure (Q6) — every CORE section must be present, even if brief. |
+| Padding a CONDITIONAL section (Contributing Factors, Related Issues, Pattern Analysis…) with filler rows or `n/a` to "complete" the template. | Template tiering rule — a conditional section with nothing real to say is omitted entirely, heading and all. Filler is noise, not rigor. |
 | Asserting "X is missing" on a story with a single grep and no paired evidence of what IS in place. | Step 5b rules 1 + 2 — every Gap row needs (a) one Evidence row showing the live current state of the surrounding area, and (b) ≥2 keyword variants for the absence claim. |
 | Accepting a reporter / assignee comment claim (e.g. "the integration already exists", "we use N default values", "there are M records") as fact without re-verifying against live data. | Q12 — every stakeholder claim either pairs with a confirming/refuting Evidence row or becomes an `## Open Questions` entry. |
 | Mentioning an unread attachment in passing ("not yet downloaded") inside an Evidence row instead of as an Open Question. | Step 5b rule 3 — deferred attachments from active-design-discussion comments are surfaced explicitly in `## Open Questions`, not buried in evidence. |
@@ -356,6 +390,7 @@ If any of these thoughts surface, the next action is NOT what you were about to 
 3. **Evidence over assumption.** If you can't find it in the DB or code, say `not found`. Never fabricate.
 4. **One fix per mismatch.** Write one recommended fix line per requirement-vs-actual mismatch.
 5. **Newcomer-friendly.** Any developer unfamiliar with the codebase should be able to pick up the report and act on it.
+6. **Enough evidence is enough.** One confirming row per claim; stop at the first confirmed root cause that explains the full symptom (Step 4b). An Open Question is a valid answer — an endless query loop is not.
 
 ## Next step
 

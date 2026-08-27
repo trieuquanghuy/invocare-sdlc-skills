@@ -38,7 +38,7 @@ When two patterns or sources contradict (two config records, two code paths, RCA
 
 ## EC8 — Read before you write
 
-Before adding or changing code, read its exports, immediate callers, and shared utilities; before changing a config path, query its current value and confirm which database holds it (per `firebase-safety.md`). "Looks orthogonal" is how the sibling-repo blast radius gets missed — `code-search.md` (reposphere first) and the `impact-analysis` skill exist precisely to read first. If you can't explain why something is structured the way it is, ask before overwriting it.
+Before adding or changing code, read its exports, immediate callers, and shared utilities; before changing a config path, query its current value and confirm which database holds it (per `firebase-safety.md`). "Looks orthogonal" is how the sibling-repo blast radius gets missed — `code-search.md` (reposphere first — `graph_query` callers before editing shared code) exists precisely to read first. If you can't explain why something is structured the way it is, ask before overwriting it.
 
 ## EC9 — Verify intent, not just behavior
 

@@ -113,7 +113,7 @@ TOKEN_ENV_VAR:    MANAGER_HUB_TEAM_TOKEN          # reference by NAME only; NEVE
 >
 > **STEP 0 — RESOLVE THE CHECKOUT MODE (do this before any other precondition).**
 > Run the detection ladder in `./checkout-modes.md` to set `CHECKOUT_MODE` to `worktree` or `main`. Do NOT assume —
-> the mode changes the preconditions immediately below, and it **flips** server gap #6 (`gitnexus_impact` is trustworthy
+> the mode changes the preconditions immediately below, and it **flips** server gap #6 (the indexed impact reading is trustworthy
 > in one mode and contaminated in the other). If the ladder is ambiguous, STOP and ask; do not guess.
 >
 > **In `main` mode, add these two preconditions** — a plain checkout has no pristine reference copy to fall back on, so
@@ -209,7 +209,7 @@ TOKEN_ENV_VAR:    MANAGER_HUB_TEAM_TOKEN          # reference by NAME only; NEVE
 >    Team Context to every dispatch prompt directly** rather than relying on the coordinator prompt's promise to
 >    propagate it.
 > 3. **Dispatch N subagents in ONE message so they run in parallel.** Default `subagent_type: code-review-depth` — it is
->    read-only *by tool whitelist* and it carries `mcp__code-lesson-kms__get_development_rules`, which closes server
+>    read-only *by tool whitelist* and it carries `mcp__code-lesson__get_development_rules`, which closes server
 >    gap #3 (the returned block ships no `--allowedTools`, so the old `claude -p` specialists were dev-rules-blind). Use
 >    `code-review-breadth` for any lens needing cross-repo reach (RepoSphere). Per `agents-safety.md` A7 each dispatch
 >    prompt is **self-contained**: the lens text verbatim + Team Context + Repo/PR context + the **absolute** checkout
@@ -370,7 +370,7 @@ run, pre-submit. Both can be in play on a re-review.
      "not a real issue" is a hypothesis (`.claude/rules/agents-safety.md` A3) — accepting it *is* the failure mode this
      gate exists to prevent. Reading code to answer a bounded question is cheap; being wrong here is not.
    - **Read the surrounding code, not just the cited line.** A finding about a null path needs the guard sites, the
-     callers, and the type; `gitnexus_context` / `gitnexus_impact` on the symbol where reachability is the question.
+     callers, and the type; reposphere `get_symbol` / `graph_query` (callers) on the symbol where reachability is the question.
    - **VALID needs positive evidence too.** To mark a finding `VALID` you must be able to write one sentence, from code
      you opened, saying what makes the defect real — *"`x.ts:142` dereferences `cfg.channels` and the only caller at
      `y.ts:88` passes the config through unset when the team has no override"*. Reciting the reviewer's own claim back is
@@ -428,12 +428,12 @@ run, pre-submit. Both can be in play on a re-review.
    files and symbols it must change. Then measure:
    - If the minimum fix is confined to lines this branch already added or modified, the radius is by construction the
      branch's own — say so and skip the impact call.
-   - Otherwise run `mcp__gitnexus__impact({ target: <symbol>, direction: "upstream" })` on each symbol the minimum fix
+   - Otherwise run `mcp__reposphere__graph_query({ template: "callers", function_name: <symbol>, repo: <repo> })` on each symbol the minimum fix
      would change. **Read server gap #6 first — where you run it, and whether you can trust it, depends on
      `CHECKOUT_MODE`:** in `worktree` mode run it from the main checkout and trust it; in `main` mode the registered path
      already carries your fixes, so the reading is contaminated — mark it advisory (or stash first). In both modes
-     `gitnexus_detect_changes`'s risk level must not be cited here; `gitnexus_impact` is the only blast-radius authority.
-   - If the minimum fix would touch another repo, run the cross-repo recipe (RepoSphere for the seam, `gitnexus_impact`
+     `git diff` is the change-scope authority; reposphere callers/callees is the only blast-radius authority.
+   - If the minimum fix would touch another repo, run the cross-repo recipe (RepoSphere for the seam, then a callers check
      inside the flagged repo for the radius) — RepoSphere never computes a radius.
 
    | Minimum fix | Route |
@@ -491,7 +491,7 @@ run, pre-submit. Both can be in play on a re-review.
    - **PASS C accounting closes:** `fix now` + `fix in follow-up` + `intent-satisfied` equals PASS B's in-scope count. A
      finding in none of the three was not routed.
    - **Every `fix in follow-up` row carries a measured radius** — either "confined to lines this branch added" or a
-     `gitnexus_impact` verdict with its depth-1 callers. A follow-up route asserted without the measurement is a guess
+     callers-check verdict with its depth-1 callers. A follow-up route asserted without the measurement is a guess
      dressed as caution; re-route it to `fix now` or go and measure.
    - **Every `intent-satisfied` row quotes the criterion verbatim.** If the cell paraphrases, infers, or cites rationale
      rather than a criterion, the row is not presentable — move it to SUBMIT.
@@ -538,7 +538,7 @@ Working-tree state reviewed: <base sha + "working tree, N fixes applied" | HEAD 
 | # | file:line (re-located) | severity | bucket | evidence (what I read that establishes this) | code I opened | follow-up |
 |---|---|---|---|---|---|---|
 | 1 | src/app/x/y.ts:214 | medium | out-of-scope | VALID defect; y.ts absent from diff vs origin/develop — no line in it added or modified by this branch | y.ts, diff scope | new ticket — legacy exporter guard |
-| 2 | src/app/a/b.ts:88 | high | invalid | guard at b.ts:81 returns early on null, so the deref at :88 is unreachable | b.ts:70–95, 3 callers via gitnexus_context | — |
+| 2 | src/app/a/b.ts:88 | high | invalid | guard at b.ts:81 returns early on null, so the deref at :88 is unreachable | b.ts:70–95, 3 callers via the call graph | — |
 | 3 | src/app/c/d.ts:52 | low | intent-satisfied | AC quoted: "the tab is visible to Guardian-plan teams only"; d.ts:52 is that restriction, and the finding objects to the restriction itself — no mechanism failure alleged | d.ts:40–70, ticket-intent.md AC list | — |
 
 ## Submitted, fix recommended in a follow-up — round <N>, final iteration
@@ -548,7 +548,7 @@ never submitted.
 
 | # | file:line | severity | minimum fix | measured radius | why deferred |
 |---|---|---|---|---|---|
-| 4 | src/app/e/f.ts:31 | medium | widen the shared `resolveChannel` signature | gitnexus_impact upstream: HIGH, 14 depth-1 callers in 2 repos | fix crosses repos; outside this PR's change set |
+| 4 | src/app/e/f.ts:31 | medium | widen the shared `resolveChannel` signature | callers check: HIGH, 14 depth-1 callers in 2 repos | fix crosses repos; outside this PR's change set |
 ```
 
 Rules for the file:
@@ -955,7 +955,7 @@ Intent tells the reviewer what to **check**; rationale tells it what to **accept
 > not merely before deciding what to fix — a finding that complies with a returned rule is withheld, not posted-then-rejected.
 
 Paired with the code-lessons corpus, and part of the latest code-review-kms MCP. `get_development_rules` (served by the
-**code-lesson-kms** MCP, tool id `mcp__code-lesson-kms__get_development_rules`) returns the team's human-authored,
+**code-lesson** MCP, tool id `mcp__code-lesson__get_development_rules`) returns the team's human-authored,
 project / language / file-scoped constraints — service-design decisions, file naming, approved libraries, "read this
 sample first". These are team conventions, NOT the global lessons corpus. Treat them as **constraints, not suggestions**:
 a change that **violates** a returned rule is a legitimate finding; a change that merely differs from your taste but
@@ -976,7 +976,7 @@ get_development_rules({
 - Returned rules are ranked **most-specific-first** (project+language+framework+path beats team-wide). On conflict, the
   higher-ranked rule wins.
 - **Allowed-tools (this is the "expose the tool" requirement):** the reviewer sub-agents must carry
-  `mcp__code-lesson-kms__get_development_rules` so they consult rules while forming findings. **Since v1.1 this is
+  `mcp__code-lesson__get_development_rules` so they consult rules while forming findings. **Since v1.1 this is
   satisfied by construction** — STEP 4 dispatches them as `code-review-depth` / `code-review-breadth` subagents, whose
   whitelists already include the tool, so the server's missing `--allowedTools` flag no longer blinds them. The driving
   session also has it allowed via `.claude/settings.local.json` → `permissions.allow`. If you ever fall back to running the
@@ -996,7 +996,7 @@ get_development_rules({
 > ranked most-specific-first. `filePath` did not narrow further for two files both matching `src/app/**/*.ts` (identical
 > rule set returned), so one call per distinct *area* is usually enough — not one per file.
 >
-> The tool lives on the **code-lessons** MCP (`mcp__code-lesson-kms__get_development_rules`), not code-review. The earlier
+> The tool lives on the **code-lessons** MCP (`mcp__code-lesson__get_development_rules`), not code-review. The earlier
 > note here (2026-07-01) recorded the gate auto-skipping because the local builds were code-lessons 0.4.0 / code-review
 > 0.3.3; that is now stale. **Still auto-skip only if the tool is genuinely absent from the tool list** — and say so
 > explicitly in the self-audit rather than silently omitting the gate.
@@ -1029,14 +1029,14 @@ SUBMIT — fix now (valid + in scope; minimum fix stays inside this PR)
      code I opened: <files/ranges/symbols>
      scope:    in added range <a–b> (±3)   |   outside window but touches changed code   |   no coordinates (architectural)
      minimum fix: <files/symbols it must change>
-     radius:   confined to lines this branch added   |   gitnexus_impact <LOW|MEDIUM>, <k> depth-1 callers
+     radius:   confined to lines this branch added   |   callers check <LOW|MEDIUM>, <k> depth-1 callers
 
 SUBMIT — fix in follow-up (valid + in scope; minimum fix exceeds this PR — still posted)
   2. <file:line> · <severity> · <summary>
      validity: VALID — <citation>
      code I opened: <files/ranges/symbols>
      minimum fix: <files/symbols it must change>
-     radius:   gitnexus_impact <HIGH|CRITICAL>, <k> depth-1 callers in <repos>   |   touches files absent from the change set
+     radius:   callers check <HIGH|CRITICAL>, <k> depth-1 callers in <repos>   |   touches files absent from the change set
      defer because: <crosses repos | changes a shared signature/API contract | needs a DB/config write | HIGH/CRITICAL>
      follow-up: <suggested ticket scope>
 
@@ -1083,7 +1083,7 @@ Validity self-audit: judged first-hand, no subagent delegation · code opened fo
   (p + k + i must equal N. A finding in none of these three was not classified.)
 Intent self-audit: C2 <ran | UNAVAILABLE — no ticket folder/brief, routed by radius alone>
   · every intent-satisfied row quotes a criterion verbatim: <yes/no>
-  · radius measured for every follow-up row (gitnexus_impact from the main checkout): <yes/no>
+  · radius measured for every follow-up row (reposphere callers check): <yes/no>
 ```
 
 If the INVALID list is empty, say so plainly — that is a normal and healthy outcome, not a gap. A gate that withholds
@@ -1299,12 +1299,12 @@ sees one of them repaired, delete the entry.
 
    | | `worktree` mode (registered path = the *main* checkout) | `main` mode (registered path = the checkout you are fixing in) |
    |---|---|---|
-   | `gitnexus_detect_changes` | **Blind to your fixes.** Reports the main checkout's dirt, none of your worktree changes. Never cite its risk level as validating a fix. | **Sees your fixes** — usable for scope, though `git diff` is still the authority. |
-   | `gitnexus_impact` | **Trustworthy.** The main checkout is genuinely pre-edit state, which is exactly what a blast radius needs. | **Contaminated.** Same folder, now sitting on the PR branch with fixes applied — it is no longer pre-edit state, so a "clean" reading may just be describing your own change back to you. |
+   | change-scope detection | `git diff` is the only authority — the code index never sees your dirty working copy. | `git diff` remains the authority. |
+   | impact / blast radius (reposphere callers) | **Trustworthy.** The indexed tree is genuinely pre-edit state, which is exactly what a blast radius needs. | **May describe your own change back to you.** If the index has picked up the PR branch, the reading is no longer pre-edit — verify against the base branch before citing. |
 
    **Mitigation by mode:**
-   - `worktree` — use `gitnexus_impact` (from the main checkout) plus an explicit `git diff` for scope.
-   - `main` — use `git diff` for scope, and treat `gitnexus_impact` as **advisory only**. To get a genuine radius,
+   - `worktree` — use the reposphere callers check (pre-edit indexed tree) plus an explicit `git diff` for scope.
+   - `main` — use `git diff` for scope, and treat indexed impact readings as **advisory only**. To get a genuine radius,
      compute it against the base: `git -C {{CHECKOUT}} stash` → run `impact` → `git stash pop`, **or** simply state in
      the gate that the radius was not independently verified. Do not silently present a contaminated reading as clean —
      that is the specific way this gap loses a real defect.

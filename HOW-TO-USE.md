@@ -13,7 +13,6 @@ Every ticket follows the same skill sequence. Each skill produces a named artifa
 
 | # | Step | Skill | Artifact | Publish Location |
 |---|---|---|---|---|
-| 0 | Impact analysis (optional) | `/impact-analysis` | blast-radius map (local, planning aid) | informs the RCA / spec — nothing published |
 | 1 | Root Cause Analysis | `/create-rca` | `tickets/{KEY}/rca.md` (incl. a **Steps to Reproduce** section) | Confluence (KMS2 space) via `/publish-rca` |
 | 2 | Technical Approach | `/create-spec` | `tickets/{KEY}/spec.md` + `validation.md` | Jira ticket description |
 | 3 | Reproduction steps | captured inside `/create-rca` (`rca.md` → Steps to Reproduce) | part of `rca.md` | — (no separate skill) |
@@ -27,13 +26,11 @@ Every ticket follows the same skill sequence. Each skill produces a named artifa
 > **Reproduction steps** are not a separate skill or a `/ticket-comment` mode — they are captured inside `rca.md` (the **Steps to Reproduce** section) during Step 1, and carried into the QA-handoff comment at Step 5.
 
 **Cross-cutting (any time):**
-- `/impact-analysis {KEY}` — read-only blast-radius map of the code + config a ticket will touch, before committing to a technical approach
 - `/task-status {KEY}` — read all artifacts + Jira + git, route to next skill
-- `/summarize-firebase-session` — audit every Firebase write made in the current conversation
 - `/prepare-uat` — alternative entry: pull an existing Technical Approach from a Jira-linked Confluence page and generate a UAT deploy file directly (skips local RCA/spec creation)
 
 **Maintenance (not part of a ticket's flow):**
-- `/sync-skills` — pull/publish the local `.claude/` skill tree against the shared Drive folder (provide the folder URL/id each run)
+- `bash invocare-sdlc-skills/update-skills.sh . --dry-run` — preview shared-skill updates; rerun without `--dry-run` to apply after reviewing the changes
 
 ---
 
@@ -48,7 +45,7 @@ flowchart TB
     %% =========== Phase 1 — Investigate ===========
     subgraph P1 ["Phase 1 — Investigate"]
         direction LR
-        S1["/create-rca<br/><i>living document — revise when<br/>new evidence surfaces</i>"]:::skill --> A1[("rca.md<br/><i>DEV + UAT sections</i>")]:::doc
+        S1["/create-rca<br/><i>living document — revise when<br/>new evidence surfaces</i>"]:::skill --> A1[("rca.md<br/><i>environment-specific evidence</i>")]:::doc
     end
 
     %% =========== Phase 2 — Plan ===========
@@ -109,7 +106,6 @@ flowchart TB
     subgraph X ["Cross-cutting — any time"]
         direction LR
         Ts["/task-status"]:::comm
-        Sf["/summarize-firebase-session"]:::comm
     end
 
     %% =========== Wires ===========
@@ -147,7 +143,7 @@ flowchart TB
 | 🔵 Blue | Skill (action you invoke) | `/create-rca`, `/apply-fix`, `/create-pr` |
 | 🟡 Yellow | Artifact (file or merged state) | `rca.md`, `session-log.md`, `Merged to DEV` |
 | 🌸 Pink | Decision gate | `Config or code fix?`, `Both ≥ 7.5?`, `UAT PR checklist` |
-| 🟣 Purple | Communication / cross-cutting | `/ticket-comment`, `/task-status`, `/summarize-firebase-session` |
+| 🟣 Purple | Communication / cross-cutting | `/ticket-comment`, `/task-status` |
 
 **Revision triggers** — when to walk a dashed edge back:
 
@@ -314,7 +310,7 @@ It starts a review on the server, hands over your PR's diff, then produces the f
 
 | Need | How to check |
 |---|---|
-| The review server is connected | Type `/mcp`. You should see `code-review-kms` **and** `code-lesson-kms` connected. |
+| The review server is connected | Type `/mcp`. You should see `code-review` **and** `code-lesson` connected. |
 | Your team token is set | It's an environment variable in your shell. If the review server connected, it's set. It is never printed. |
 | Your PR is pushed | The review reads **committed** code, not your unsaved edits. Anything not pushed is invisible to it. |
 
@@ -422,11 +418,9 @@ Triggers on: `prepare uat`, `deploy uat`, `build deploy.md from comment`, `gener
 | Skill | When to use |
 |---|---|
 | `/code-review-kms {PR}` | Run the AI review on an open PR — drives it end-to-end, stops at three approval points, never commits or pushes for you. See Step 5c |
-| `/impact-analysis {KEY}` | Before writing a technical approach — read-only blast-radius map of the code + config a ticket will touch ("what does this touch?", "is this plan safe?") |
 | `/task-status {KEY}` | Daily standup, return-after-time-away, "where am I on GEN-XXXX?" |
 | `/task-status all` | Overview across every open ticket folder |
-| `/summarize-firebase-session` | Audit every Firebase session created in the current conversation — uses `sessions/running-log.md` as the index |
-| `/sync-skills` | Maintenance — pull/publish the local `.claude/` skill tree against the shared Drive folder (provide the folder URL/id each run) |
+| `bash invocare-sdlc-skills/update-skills.sh . --dry-run` | Maintenance — preview updates from the shared skill repository; rerun without `--dry-run` to apply |
 
 ---
 

@@ -1,4 +1,14 @@
 {
+  "//": [
+    "This is your personal settings.local.json template — it is NEVER overwritten by sync.",
+    "",
+    "The sync tool installs a SHARED hooks fragment at .claude/hooks/settings.json.",
+    "You MUST merge that fragment into your settings.local.json by hand.",
+    "Copy the 'hooks' entries from .claude/hooks/settings.json and merge them",
+    "with any personal hooks you add below (like the sdlc-gate example shown here).",
+    "",
+    "Do NOT copy settings.local.json back to the repo — it is personal/per-machine."
+  ],
   "permissions": {
     "allow": [
       "Bash(git:*)",
@@ -8,14 +18,36 @@
     "ask": []
   },
   "hooks": {
-    "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/scripts/sdlc-gate.sh\" clear" } ] }
+    "PreToolUse": [
+      {
+        "matcher": "Read|Grep|Glob|Bash",
+        "hooks": [ { "type": "command", "command": ".claude/hooks/block-confidential.sh", "timeout": 5 } ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [ { "type": "command", "command": ".claude/hooks/check-lessons-fetched.sh", "timeout": 5 } ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/scripts/sdlc-gate.sh\" check" } ]
+      }
     ],
     "PostToolUse": [
-      { "matcher": "*", "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/scripts/sdlc-gate.sh\" set" } ] }
+      {
+        "matcher": "mcp__code-lesson-kms__list_lessons_for_stack",
+        "hooks": [ { "type": "command", "command": ".claude/hooks/mark-lessons-fetched.sh", "timeout": 5 } ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/scripts/sdlc-gate.sh\" set" } ]
+      }
     ],
-    "PreToolUse": [
-      { "matcher": "Edit|Write", "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/scripts/sdlc-gate.sh\" check" } ] }
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": ".claude/hooks/block-confidential-prompt.sh", "timeout": 5 } ] },
+      { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR/.claude/scripts/sdlc-gate.sh\" clear" } ] }
+    ],
+    "PreCompact": [
+      { "hooks": [ { "type": "command", "command": ".claude/hooks/clear-lessons-sentinel.sh", "timeout": 5 } ] }
     ]
   }
 }
