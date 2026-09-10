@@ -80,6 +80,12 @@ fetch `review-artifacts/<key>.patch`, and give each lens the artifacts its own m
 deliberately left unpinned so the next diff-bearing build retries it. Split locally only as a last resort, and say so.
 Full procedure: runbook → STEP 3.7.
 
+**Download the artifacts once, then re-slice them locally each iteration.** The server keeps STEP 3's pre-fix diff until
+GATE 3, so re-fetching mid-loop hands the lenses the unfixed state and every iteration re-reviews round 0. Keep the
+server's pinned *plan* (its file membership) and re-cut the *bytes* from the recomputed working-tree diff. And when a
+manifest is missing, take the `reviewId` from **this** review's action — never from `get_open_comments`, which only
+aggregates *completed* reviews and so yields nothing on a first review and a stale earlier round's id on a re-review.
+
 **Run the development-rules gate before classifying findings**, never after (runbook → DEVELOPMENT RULES GATE). Call
 `get_development_rules` with `project` from `git remote` (bare `owner/repo` slug), the `language` + `frameworks` actually
 imported by the changed files, and `filePath`. A change that **violates** a returned team rule is a valid finding; one
