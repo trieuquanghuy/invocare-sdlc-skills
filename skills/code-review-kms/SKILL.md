@@ -72,6 +72,14 @@ single message so they run in parallel** (`code-review-breadth` for a cross-repo
 into `codeReviewJson`. Count the lenses the block actually carries — N varies between runs; 5 and 6 have both been
 observed. The other nodes still run their blocks as returned.
 
+**The artifact split belongs to the server — take it, don't invent it.** When its planning pass succeeds, the action
+carries an `artifactManifest` plus `artifactReviewId`, and the bash block carries a download curl per artifact. Because
+the block is a prompt carrier we run none of, those curls are the easiest thing in the whole run to drop — lift them,
+fetch `review-artifacts/<key>.patch`, and give each lens the artifacts its own manifest entry names. If planning failed
+(`Artifact planning failed … (cli-exit-1)`), force a re-plan before accepting the degrade: a fallback plan is
+deliberately left unpinned so the next diff-bearing build retries it. Split locally only as a last resort, and say so.
+Full procedure: runbook → STEP 3.7.
+
 **Run the development-rules gate before classifying findings**, never after (runbook → DEVELOPMENT RULES GATE). Call
 `get_development_rules` with `project` from `git remote` (bare `owner/repo` slug), the `language` + `frameworks` actually
 imported by the changed files, and `filePath`. A change that **violates** a returned team rule is a valid finding; one
@@ -108,6 +116,8 @@ instead of the findings is how a round gets gamed.
 - **Never cite a GitNexus reading without checking the mode** — `gitnexus_impact` is contaminated in `main` mode,
   `gitnexus_detect_changes` is blind in `worktree` mode (server gap #6).
 - **Write errors are evidence, not a retry signal.** On an error, stop and surface it verbatim with the `executionId`.
+- **Never present a round as scoped when the split was yours.** Report which path produced the artifacts — the server's
+  pinned plan, its plan after N re-plan attempts, or the local fallback.
 
 ## Next step
 
