@@ -27,6 +27,11 @@ Plan schema:
     "lenses":    {"security-reviewer": [1, 2]}          // optional
   }
 
+Keys may also be the server's own pinned artifact keys ("artifact-1", …), which
+is how the convergence loop re-cuts a pinned plan against a fixed working tree.
+Either form writes artifact-1.patch — a key already carrying the prefix is not
+prefixed twice.
+
 Coverage is the load-bearing check: every file in the diff must land in at
 least one artifact, and (when "lenses" is given) every artifact must be read by
 at least one lens. Either violation exits 2 — a file no lens reads is a defect
@@ -74,6 +79,17 @@ def stats(section: str) -> tuple[int, int, int]:
     added = sum(1 for l in section.splitlines() if l.startswith("+") and not l.startswith("+++"))
     removed = sum(1 for l in section.splitlines() if l.startswith("-") and not l.startswith("---"))
     return added, removed, len(section.encode("utf-8"))
+
+
+def artifact_filename(key: str) -> str:
+    """Stem for an artifact key, without double-prefixing a server key.
+
+    A locally generated plan keys buckets `1`, `2`, … and the files are named
+    `artifact-1.patch`. A plan carrying the server's own pinned keys already has
+    them in that form, so re-splitting under it must not yield
+    `artifact-artifact-1.patch` — the lenses are handed paths by name.
+    """
+    return key if key.startswith("artifact-") else f"artifact-{key}"
 
 
 def group_key(path: str) -> str:
@@ -145,7 +161,7 @@ def main() -> int:
     written = []
     for key in sorted(artifacts, key=lambda k: (len(k), k)):
         body = "".join(sections[p] for p in artifacts[key] if p in sections)
-        target = out_dir / f"artifact-{key}.patch"
+        target = out_dir / f"{artifact_filename(key)}.patch"
         target.write_text(body, encoding="utf-8")
         written.append((target, len(artifacts[key]), len(body.encode("utf-8"))))
 
