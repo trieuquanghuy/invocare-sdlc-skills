@@ -93,17 +93,13 @@ BASE="${INVOCARE_ROOT:-$(pwd)}"
 
 **Step 0c: Multi-repo discovery (multi-repo mode only).**
 
-For each subdirectory of `$BASE` that has a `.git/`, run:
+Run the bundled discovery script in ONE Bash call — it scans every subdirectory of `$BASE` and prints only the repos with matching ticket commits:
 
 ```
-git -C "$BASE/$repo" log --all --grep="{TICKET_KEY}" --no-merges \
-  --not origin/main origin/develop --pretty=%H 2>/dev/null
+bash .claude/skills/create-pr/scripts/git-facts.sh --discover "$BASE" {TICKET_KEY}
 ```
 
-A repo is a **candidate** if this command returns ≥1 commit hash. Skip repos that:
-- Have no `.git/` (not initialised — print one-line note, continue)
-- Return zero matching hashes (no work for this ticket — skip silently)
-- Don't have `origin/main` AND don't have `origin/develop` (no recognised base — print warning, skip)
+Each `CANDIDATE:` line carries the repo name, matching-commit count, and the oldest matching commit. The script skips repos with no `.git/` and repos with zero matching hashes silently, and prints a `WARN:` line for repos missing both `origin/main` and `origin/develop` (no recognised base).
 
 Output the candidate list to the user:
 
@@ -131,23 +127,15 @@ Make at least one commit whose message contains '{TICKET_KEY}' (e.g.
 
 **Step 0d: Per-repo prep — capture facts and detect ticket commits.**
 
-For each repo in scope (single-repo arg, or each candidate in multi-repo mode), `cd` into the repo and capture:
+For each repo in scope (single-repo arg, or each candidate in multi-repo mode), run the bundled fact-capture script in ONE Bash call:
 
 ```
-git fetch origin                                                        # ensure refs fresh
-git status --porcelain                                                  # working-tree state
-git rev-parse --abbrev-ref HEAD                                         # current branch
-# Base detection — see the resolution rule below                        # (replaces origin/HEAD)
-git rev-list --count {BASE}..HEAD 2>/dev/null                           # ahead count
-git rev-list --count HEAD..origin/{BASE}                                # behind count
-git diff {BASE}..HEAD --stat                                            # diff stat
-test -d .git/rebase-apply || test -d .git/rebase-merge                  # rebase in progress
-test -f .git/MERGE_HEAD                                                 # merge in progress
-test -f .git/CHERRY_PICK_HEAD                                           # cherry-pick in progress
-test -f .git/BISECT_LOG                                                 # bisect in progress
-git symbolic-ref HEAD                                                   # detached HEAD if non-zero
-git diff --name-only --diff-filter=U                                    # unresolved conflicts
+bash .claude/skills/create-pr/scripts/git-facts.sh {REPO_PATH} {TICKET_KEY}
 ```
+
+It emits one compact sectioned block: fetch, resolved base, `status --porcelain`, current branch (or `DETACHED`), ahead/behind counts vs `origin/{BASE}`, the five dangerous-state markers (rebase-apply / rebase-merge / MERGE_HEAD / CHERRY_PICK_HEAD / BISECT_LOG), unresolved-conflict list, `diff --stat` vs base, a hygiene scan of changed paths against the git-safety G7 cruft patterns, and the ticket commits (`git log --all --grep`). The script is read-only — its only network call is `git fetch origin`.
+
+When interpreting `status_porcelain`, apply `.claude/rules/local-dev-overrides.md`: pre-existing run-local config modifications (in FCRM-Web typically `environment*.ts`, `package.json`/lock, `.nvmrc`, `.gitignore`) are expected noise — never stage, revert, or flag them; they simply stay out of the PR. A dirty tree made of only such files does NOT trigger Flow A rescue.
 
 **Base branch resolution** — per the team Git Branching & Release Strategy (Confluence: `Git Branching & Release Strategy`, page id `327043186731`):
 
@@ -238,7 +226,7 @@ Skip this step entirely if Step 0e classified as **Already prepped** — proceed
 | `release/*` | NO — out of scope (manual semver flow) | n/a |
 | `hotfix/*` | NO — out of scope (manual semver flow from a release tag) | n/a |
 
-Fetch the Jira ticket via Atlassian MCP and cache `issuetype.name` — Step 1f (commit type) and Step 4 (title generation) reuse it. If the Atlassian MCP is unavailable, continue with `feature/` and print: `Note: Jira issue type not fetched — branch prefix defaults to feature/`.
+Do NOT fetch the Jira ticket here. Fetch it lazily — only when actually needed: (a) Step 1f is about to commit review fixes and needs `issuetype.name` for the commit type, or (b) the branch description below falls through spec.md AND rca.md to the Jira Summary field. When fetching, request minimal fields only (`summary`, `issuetype`) and cache the result — Step 1f and Step 4 reuse it. If the Atlassian MCP is unavailable at fetch time, continue (commit type falls back to `feat`) and print: `Note: Jira issue type not fetched — commit type defaults to feat`.
 
 **Description** — first match wins:
 
@@ -270,7 +258,35 @@ This replaces the previous refusal behavior. The existing local branch is left u
 
 **Step 0f.3: Show the plan and ask for confirmation.**
 
-The per-flow operation sequences live in `references/prep-flows.md` (§§ Flow A / Flow B / Flow C — operations). Read them once and use them to populate the `Will run:` block below.
+The per-flow operation sequences are inlined below — use the matched flow's block to populate the `Will run:` plan. (`references/prep-flows.md` is maintainer documentation with the same content plus operator detail; it is not read at runtime.)
+
+**Flow A — operations:**
+```
+1. git fetch origin
+2. git stash push -u -m "create-pr-prep-{TICKET_KEY}"
+3. git switch {BASE}
+4. git pull --ff-only
+5. git switch -c {NEW_BRANCH}
+6. git stash pop        ← may conflict — see the Flow A conflict gate
+```
+
+**Flow B — operations:**
+```
+1. git fetch origin
+2. git switch {BASE}    # skip if already on it
+3. git pull --ff-only
+4. git switch -c {NEW_BRANCH}
+```
+
+**Flow C — operations:**
+```
+1. git fetch origin
+2. (if dirty) git stash push -u -m "create-pr-prep-{TICKET_KEY}"
+3. git switch -c {NEW_BRANCH} origin/{BASE}
+4. for sha in TICKET_COMMITS (chronological, oldest first):
+     git cherry-pick {sha}     ← on conflict: pause at the cherry-pick conflict gate
+5. NO auto stash pop — the stash stays; the user controls its fate.
+```
 
 Show the plan **once**, substituting the operations for the matched flow:
 
@@ -283,7 +299,7 @@ Ticket commits: {N} to cherry-pick   ← Flow C only
   - {sha-short} {first line of commit subject}
 
 Will run:
-  {operations for matched flow — from prep-flows.md}
+  {operations for matched flow — from the inlined blocks above}
 
   {Flow C only:} The stash from step 2 is NOT auto-popped. Your dirty out-of-scope files stay safe in stash@{0} — pop or drop when you're ready.
 
@@ -298,7 +314,7 @@ Proceed? (yes / edit-branch / no)
 
 Run each command sequentially. Surface output of each to the user. **Stop immediately on the first non-zero exit code** — do not retry, do not strip flags, do not auto-rollback. (Rule 18 / Rule 19.)
 
-Conflict gates are documented in `references/prep-flows.md`:
+Conflict-gate prompts (read from `references/prep-flows.md` only if a conflict actually occurs):
 - Flow A `git stash pop` produced conflicts → § Conflict gate (Flow A only)
 - Flow C cherry-pick produced conflicts → § Cherry-pick conflict gate (Flow C only)
 
@@ -319,16 +335,22 @@ Read repo metadata to identify the stack:
 
 Map to the stack identifier the corpus uses (e.g. `angular-typescript`, `nestjs-typescript`, `node-typescript`).
 
-**Step 1b: Fetch relevant lessons.**
+**Step 1b: Skim, then fetch relevant lessons.**
+
+Skim titles first — never dump full lesson bodies. Issue BOTH skim calls in ONE parallel turn (severity filtering is exclusive; a single call cannot cover both):
 
 ```
-mcp__code-lesson__get_lessons_for_stack(
-  stack: "{STACK_ID}",
-  severity: "high"        // start with high+critical to keep noise low
-)
+mcp__code-lesson__list_lessons_for_stack(stack: "{STACK_ID}", severity: "high")
+mcp__code-lesson__list_lessons_for_stack(stack: "{STACK_ID}", severity: "medium")
 ```
 
-If the stack returns 0 lessons, retry with `severity: "medium"`. If still 0, skip this step and emit info: `No lessons found for stack {STACK_ID} — review skipped`.
+From the combined skim, pick the 3–10 ids relevant to the diff's file types and fetch only those:
+
+```
+mcp__code-lesson__get_lessons_by_ids(ids: [...])   // max 20 per call
+```
+
+If both skims return 0 lessons, skip this step and emit info: `No lessons found for stack {STACK_ID} — review skipped`.
 
 **Step 1c: Open-comments check (optional but recommended).**
 
@@ -412,7 +434,7 @@ Use ONE commit for all review fixes — keeps history readable. Do NOT amend the
 
 If 0 fixes applied (all deferred or 0 findings) → no commit, continue.
 
-Re-capture git facts (Step 0d) since the commit count changed.
+Re-capture git facts since the commit count changed — re-run `scripts/git-facts.sh {REPO_PATH} {TICKET_KEY}` (Step 0d).
 
 ---
 
@@ -423,11 +445,9 @@ Once Step 1 completes (with or without fixes), validate the PR inputs via the pr
 1. Read `./checker-prompt.md` from this skill folder.
 2. Dispatch a `pipeline-checker` subagent (`.claude/agents/pipeline-checker.md`) with:
    - The full prompt from `checker-prompt.md`
-   - Ticket key, repo path, repo name, current branch, base branch, drafted title and body (built in Step 4)
-   - Pre-computed git facts (output of `git status --porcelain`, `git rev-list --count`, `git diff {BASE}..HEAD --stat`, first 200 lines of `git diff {BASE}..HEAD`, `gh auth status`)
-   - **The full file list** from `git diff --name-only {BASE}..HEAD` (used by P24 for spec-vs-diff cross-check — the 200-line truncation of the full diff isn't enough to extract the complete changed-file set)
-   - **The contents of `tickets/{TICKET_KEY}/spec.md`** if it exists (also for P24). If absent, note it in the dispatch prompt; P24 will skip.
-   - Result of `gh pr list --head {BRANCH} --state open --json number,title --limit 1` (for P11)
+   - Ticket key, repo path, repo name, current branch, base branch, drafted title and body (built in Step 4), and the planned push / `gh pr create` commands
+   - Result of `gh pr list --head {BRANCH} --state open --json number,title --limit 1` (for P11 — the checker can't reproduce the exact moment-in-time result you acted on)
+   - **Paths, not contents.** The checker has Read/Grep/Bash — do NOT inline the diff, the changed-file list, or spec.md. Instead pass: the spec path (`tickets/{TICKET_KEY}/spec.md`, or note its absence so P24 skips) and a note that the diff is `git diff {BASE}..HEAD` (file list via `--name-only`) run from the repo path. The checker fetches what it needs itself.
 3. Parse the JSON result block: `{ verdict, ticket_key, repo, branch, summary, gaps[] }`.
 4. Branch on verdict:
    - **FAIL** → print every blocker, exit. Do NOT push. Do NOT create PR.
@@ -454,7 +474,7 @@ git push -u origin {CURRENT_BRANCH}
 ```
 
 Forbidden flags (the checker P13 enforces these as blockers — repeat the rule here so the agent never tries them):
-- NEVER `--force` or `--force-with-lease` unless the user has explicitly typed those exact flags in this turn
+- NEVER `--force` or `--force-with-lease`; if history recovery requires either flag, stop and require the user to perform it manually outside this workflow
 - NEVER `--no-verify` (skips pre-push hooks like commit signing or lint)
 - If the push is rejected (non-fast-forward): stop. Tell the user `Push rejected — branch is not fast-forward. Investigate the conflict before re-running /create-pr`
 
@@ -612,7 +632,7 @@ Runs **instead of** Steps 0a–7 when the invocation specifies hotfix mode (`hot
 ## Rules
 
 1. **Never push to `main` or `master`.** P2 enforces — if the current branch is the base, refuse.
-2. **Never use `--force`, `--force-with-lease`, or `--no-verify`** unless the user has typed those exact flags in this turn. P13 enforces.
+2. **Never use `--force`, `--force-with-lease`, or `--no-verify`.** Destructive history recovery is always manual outside this workflow. P13 enforces.
 3. **Never commit secrets.** P6 scans the diff. If matched, stop and surface — never proceed.
 4. **Body MUST start with `Ticket: <jira-url>`** — team convention from sample PRs.
 5. **Title MUST follow `KMS-{TICKET_KEY} | <description>`** — the `KMS-` prefix is the team convention; do not omit it and do not substitute `:` for ` | `.
@@ -635,7 +655,7 @@ Runs **instead of** Steps 0a–7 when the invocation specifies hotfix mode (`hot
 22. **Refuse if the branch is too far behind base.** If `git rev-list --count HEAD..{BASE}` exceeds 50, the branch is stale and a merge will likely conflict. Rebase against current base before re-running. PR-specific. P27 enforces.
 23. **Apply `.claude/rules/agents-safety.md`.** Universal subagent rules — inherit Output Guardian and Secrets Safety, read-only by default, verify don't trust, structured output, escalate failures rather than auto-retry. The pre-flight checker dispatched in Step 2 is the only subagent this skill currently uses; the rules apply to any future subagent.
 
-24. **Override Semantics — which rules the user can wave through, which are absolute.** The user CANNOT override the following under any circumstance: P2 (push to base), P6 (secrets in diff), P14 (AI/automation attribution), P15 (issue-closing keywords), P16 (dangerous git state), P28 (build artifacts in diff), Rule 1 (push to base), Rule 3 (commit secrets), Rule 9 (attribution), Rule 10 (closing keywords), Rule 11 (dangerous state). Attempting to is itself a violation. The user CAN override the following by explicitly typing `yes` (single token, single turn) after the skill surfaces the gap: P9 (branch name lacks ticket key — convention only), P12 (migration-checkbox state mismatch), P20 in its untracked-only form (Rule 17, working tree contains an unignored `.env` that is NOT in the PR diff), P26 (no commit message references ticket key — fixed by P10's title enforcement), P27 (branch >50 commits behind base — heuristic), and the new P29 (cross-ticket commits on branch — usually auto-resolved by Flow C). Forbidden-flag rules (P13, P19) are NOT user-overridable mid-skill; the user can only "opt in" by typing the exact forbidden flag in their original request, which the skill then echoes back for confirmation.
+24. **Override Semantics — which rules the user can wave through, which are absolute.** The user CANNOT override the following under any circumstance: P2 (push to base), P6 (secrets in diff), P13 (`--force`, `--force-with-lease`, or `--no-verify`), P14 (AI/automation attribution), P15 (issue-closing keywords), P16 (dangerous git state), P28 (build artifacts in diff), Rule 1 (push to base), Rule 2 (destructive push flags), Rule 3 (commit secrets), Rule 9 (attribution), Rule 10 (closing keywords), Rule 11 (dangerous state). Attempting to is itself a violation. The user CAN override the following by explicitly typing `yes` (single token, single turn) after the skill surfaces the gap: P9 (branch name lacks ticket key — convention only), P12 (migration-checkbox state mismatch), P20 in its untracked-only form (Rule 17, working tree contains an unignored `.env` that is NOT in the PR diff), P26 (no commit message references ticket key — fixed by P10's title enforcement), P27 (branch >50 commits behind base — heuristic), and P29 (cross-ticket commits on branch — usually auto-resolved by Flow C). P19 (`--draft` or `--auto-merge`) is not user-overridable mid-skill; it is available only when the user typed the exact option in the original request and confirms it when surfaced.
 
 25. **Apply the team Git Branching & Release Strategy.** Source: Confluence page `Git Branching & Release Strategy` (page id `327043186731`). This skill operationalizes the strategy as follows:
     - **Branch prefix is `feature/`** for every sprint-level ticket (Bug, Defect, Story, Task, Sub-task, Epic). Sprint-level bug fixes are still `feature/*` — they are not `hotfix/*`.
@@ -694,7 +714,7 @@ A run is complete when every phase below was performed AND the constraint set it
 - [ ] Prep ran sequentially with no auto-rollback / no retry after a failure (Rule 18 / Rule 19); Flow C cherry-picks chronological with conflicts cleared, stash retained not popped (Step 0f.4); Flow A stash-pop conflicts cleared via the gate (Step 0f.5)
 
 **Lessons review & commit (Step 1)**
-- [ ] Stack identified; lessons corpus queried at severity high+ (medium if 0); review skipped only when corpus has nothing (Steps 1a–1b)
+- [ ] Stack identified; lessons corpus skimmed at severity high AND medium in one parallel turn, relevant ids fetched via `get_lessons_by_ids`; review skipped only when corpus has nothing (Steps 1a–1b)
 - [ ] Each finding shown with file:line, severity, before/after diff (Step 1d–1e)
 - [ ] Review fixes committed as ONE subject-only Conventional-Commits-with-scope commit per Step 1f (Rule 7 — WHAT not WHY, no meta-phrases, no body, not amended), or no commit if 0 fixes; commit did NOT touch CI configs or lock files (Rule 12 / P17, Rule 13 / P18); no AI/automation attribution (Rule 9 / P14)
 
@@ -722,7 +742,7 @@ A run is complete when every phase below was performed AND the constraint set it
 | Force-pushing to recover from a rebase | Forbidden by P13 — user does this manually if needed |
 | Generating a Conventional Commits-style title (`feat:`, `fix:`) | Team uses `KMS-{TICKET_KEY} | <description>` — no leading verbs |
 | Omitting the `KMS-` prefix from the title | The prefix is mandatory regardless of project (`GEN`, `FIR`, `IVC`, `PARK`) |
-| Posting the PR URL to Jira from this skill | This skill only creates the PR. Run `/ticket-comment {TICKET_KEY}` separately if Jira needs the link |
+| Posting the PR URL to Jira from this workflow | This workflow only creates the PR. Post the link to Jira separately if needed. |
 | Refusing on a polluted feature branch | Don't refuse — Flow C is the rescue. Cherry-pick ticket commits onto a clean branch off base, stash the rest, push the new branch. |
 | Refusing on an untracked `.env` not in the diff | Don't refuse outright. Surface a one-line warning; Flow C stashes it. Only refuse if `.env` is STAGED or in the PR diff. |
 | Stashing then auto-popping in Flow C | Flow C never auto-pops. The stashed files are out-of-scope by definition; user pops manually when they want them back. |

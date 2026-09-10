@@ -17,5 +17,10 @@ CLAUDE.md.backup-*
 
 # os / editor / old-sync cruft
 .DS_Store
+__pycache__/
+*.py[cod]
 *.bak
 *.drive
+
+# local planning artifacts
+docs/

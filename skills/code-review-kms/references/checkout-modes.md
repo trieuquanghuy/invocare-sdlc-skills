@@ -70,10 +70,10 @@ GitNexus resolves a repo by its **registered absolute path**. Which tool that br
 
 | | `worktree` (registered path = the *main* checkout) | `main` (registered path = the folder you are fixing in) |
 |---|---|---|
-| `gitnexus_detect_changes` | **Blind to your fixes** — reports the main checkout's dirt. Never cite its risk level. | **Sees your fixes.** Usable for scope; `git diff` is still the authority. |
-| `gitnexus_impact` | **Trustworthy** — the main checkout is genuinely pre-edit state. | **Contaminated** — same folder, now on the PR branch with fixes applied. |
+| change-scope detection | `git diff` is the only authority — the code index reflects the committed tree, not your dirty working copy. | `git diff` remains the authority; the index may lag your branch. |
+| impact / blast radius (reposphere `graph_query` callers) | **Trustworthy** — the indexed tree is genuinely pre-edit state. | **May lag** — the index reflects the last indexed commit, not your just-applied fixes; verify symbols still exist in the working tree. |
 
-**In `main` mode, treat `gitnexus_impact` as advisory.** For a genuine pre-edit radius either stash first
+**In `main` mode, treat indexed impact readings as advisory.** For a genuine pre-edit radius either stash first
 (`git stash` → `impact` → `git stash pop`) or state plainly in the gate that the radius was not independently verified.
 A contaminated reading presented as clean is precisely how this gap loses a real defect — it describes your own change
 back to you and calls it safe.
@@ -112,7 +112,7 @@ regularly.
 open at once with no stashing and no branch switching.
 
 It is **optional**. The driver supports it because some of us keep a main checkout pinned to `origin/main` as a clean
-reference while all ticket work happens in `.worktrees/<ticket>/<repo>` — which is what makes `gitnexus_impact`
+reference while all ticket work happens in `.worktrees/<ticket>/<repo>` — which is what makes the indexed impact reading
 trustworthy in that mode.
 
 If you want to try it:
@@ -127,4 +127,4 @@ before any wave that builds or tests. Removing one is manual and deliberate:
 `git -C FCRM-Web worktree remove ../.worktrees/gen-1234/FCRM-Web`.
 
 **Not using worktrees costs you nothing in this driver** beyond the two extra preconditions above and the advisory
-status of `gitnexus_impact`. Both are handled by the procedure, not by you.
+status of the indexed impact reading. Both are handled by the procedure, not by you.

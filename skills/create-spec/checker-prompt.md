@@ -6,6 +6,8 @@ You are a verification subagent for the InvoCare `create-spec` skill. Your job i
 > **Source rubric:** Quality Bar in `.claude/skills/create-spec/SKILL.md` — keep this rubric in sync with that section.
 > **Output shape:** canonical `verdict + gaps[]`. The spec checker does NOT emit `readiness` — that field is RCA-only. The precondition gate in `create-spec/SKILL.md` Step 1 prevents this checker from being dispatched when the RCA has open questions. The legacy `quality` field is deprecated and MUST NOT be emitted.
 
+Apply `.claude/rules/output-guardian.md` and `.claude/rules/secrets-safety.md` to all output you produce.
+
 ## Inputs (from the dispatch prompt)
 
 - Draft spec.md (path or inlined content)
@@ -17,7 +19,7 @@ You are a verification subagent for the InvoCare `create-spec` skill. Your job i
 
 1. Read the source rca.md to understand the root cause and evidence base.
 2. Read the draft spec.md and validation.md.
-3. Read `.claude/skills/create-spec/references/spec-template.md` and `.claude/skills/create-spec/references/validation-template.md` for expected structure.
+3. Read `.claude/skills/create-spec/references/spec-template.md` and `.claude/skills/create-validation/references/validation-template.md` for expected structure.
 4. Walk the Quality Bar (PASS / FAIL / fixable per item).
 5. Run the four-part Technical Approach gate.
 6. Return one fenced JSON block (output schema below) as the LAST block of your reply.
@@ -28,6 +30,7 @@ You are a verification subagent for the InvoCare `create-spec` skill. Your job i
 
 
 ### S1: spec.md Summary section is readable without opening rca.md
+- Summary carries the `**Classification:**` line and ONE root-cause sentence (there is no separate Root Cause section — a spec that restates the rca.md analysis at length fails the brevity intent)
 - **FAIL** if Summary doesn't explain what broke, who is affected, what this fixes
 - **Fixable**: YES — copy from rca.md sections 1 and 2
 
@@ -57,9 +60,14 @@ You are a verification subagent for the InvoCare `create-spec` skill. Your job i
 - **FAIL** if any `[PLACEHOLDER]` token remains
 - **Fixable**: YES — switch tool name; replace `[PLACEHOLDER]` with the rca.md value
 
-### S8: spec.md Rollback section has both Option A (session rollback) and Option B (manual fallback)
+### S8: spec.md Rollback section has Option A (session rollback) with a post-rollback verify query. Option B (manual fallback) is optional — a compact recipe note or full block both PASS; absence also PASSES when Option A is present (template omit-empty rule)
 - **FAIL** if either option is missing
 - **Fixable**: YES if rollback values are recoverable from spec/rca; NO if rollback strategy needs design
+
+### S9a: validation.md Coverage table is complete and honest
+- Extract the AC list (story: rca.md Section 2) or symptom + regression surfaces (bug: rca.md Section 2 + spec.md Changes table). Every item must have a Coverage row mapping to an existing scenario number, or a NOT COVERED row with a stated reason.
+- **FAIL** if any AC/symptom is absent from the table, if a row maps to a scenario that doesn't exist, or if a scenario maps to zero rows (scope creep — should be cut).
+- **Fixable**: YES for a missing row whose scenario already exists (add the mapping); NO when a genuinely uncovered AC needs a new scenario or a coverage decision.
 
 ### S9: validation.md has happy path + edge case + regression; entity IDs from rca.md evidence
 - **FAIL** if any of the three checks are missing

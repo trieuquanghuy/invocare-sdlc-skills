@@ -75,5 +75,5 @@ After the probe, decide:
 | Probe result | Action |
 |---|---|
 | Config explicitly drives the behavior the reviewer is questioning | Escalate `behavioral` with the path. Do not edit code. |
-| No config touches this behavior; comment is about pure code logic | Continue with the `behavioral` bucket's exception clauses (a)–(d). Confidence floor 0.95. |
+| No config touches this behavior; comment is about pure code logic | Continue with the `behavioral` bucket's four exception criteria. Confidence floor 0.95. |
 | Probe is inconclusive (schema unclear, env mismatch) | Escalate. Treat inconclusive as "don't know" — do not edit code on a hunch. |

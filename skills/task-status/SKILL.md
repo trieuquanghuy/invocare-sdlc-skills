@@ -6,11 +6,11 @@ argument-hint: "Jira ticket key (e.g. GEN-2759) — omit for overview of all act
 
 # Task Status
 
-**Read-only daily check.** Pulls fresh Jira and Confluence data, compares against local artifacts, and shows: what's new, what's been done, where the fix is across environments, and what to do next. Does not execute anything.
+**Read-mostly daily check with a local cache write.** Pulls fresh Jira and Confluence data, compares against local artifacts, and shows: what's new, what's been done, where the fix is across environments, and what to do next. It writes only the ticket-scoped `.last-checked` cache described in Step 9.
 
 **Output guardian:** all output reads as written by a developer. Never mention tool names, session IDs, MCP calls, or any indication of automation.
 
-**Git safety:** apply `.claude/rules/git-safety.md` — read-only operations only (this skill never writes); refuse on dangerous git states for the config-drift check.
+**Git safety:** apply `.claude/rules/git-safety.md` — Git and external systems remain read-only; the only write is the ticket-scoped local cache. Refuse on dangerous git states for the config-drift check.
 
 ## NOT This Skill If
 
@@ -18,7 +18,6 @@ argument-hint: "Jira ticket key (e.g. GEN-2759) — omit for overview of all act
 - User wants to draft a UAT deploy file from a Confluence handoff comment → use `/prepare-uat {TICKET_KEY}` first, then `/apply-fix {TICKET_KEY} uat`.
 - User wants to publish the RCA to Confluence → use `/publish-rca`.
 - User wants to post a Jira comment summarising what was done → use `/ticket-comment`.
-- User wants a summary of every Firebase session in this Claude session (cross-ticket) → use `/summarize-firebase-session`.
 
 ---
 
@@ -33,16 +32,32 @@ argument-hint: "Jira ticket key (e.g. GEN-2759) — omit for overview of all act
 
 ---
 
+## Execution plan: two parallel batches, then write
+
+The steps below are numbered for reading order, not execution order. Run them as two batches of parallel tool calls — nothing in batch 1 depends on anything else in batch 1:
+
+- **Batch 1 (one turn, two parallel calls):** `bash .claude/skills/task-status/scripts/extract.sh {TICKET_KEY}` (covers Steps 2 AND 6 — all local facts plus the git scan) + Step 3 Jira fetch.
+- **Batch 2 (one turn):** Step 4 Confluence (needs the URL from batch 1) + Step 5 config drift queries in parallel (paths come from the LATEST RUN SECTION of the script output). Skip whichever the skip rules eliminate.
+- Then build the card (Step 8) and write `.last-checked` (Step 9).
+
+Total: ~4–6 tool calls. Do not hand-write extraction greps — the script already emits every field Steps 2/6 need.
+
 ## Step 0: Identify Mode and Tickets
 
 **With a ticket key:** go directly to Step 2.
 
 **With no argument:**
-1. Scan `tickets/` for all subdirectories
-2. Note last-modified timestamp and artifact files per folder
-3. Run Step 1 (overview table)
-4. Run full detail flow for the most recently modified ticket
-5. Ask: "Want detail on another ticket?"
+1. One shell pass over `tickets/` — never Read files per folder for the overview:
+   ```bash
+   for d in tickets/*/; do
+     echo "== $d $(ls "$d" | tr '\n' ' ')"
+     grep -E '^\- \*\*(Environment|Action|Date)' "$d/session-log.md" 2>/dev/null | tail -6
+   done
+   ```
+   File presence gives the stage; the session-log tail gives env progress and last activity.
+2. Run Step 1 (overview table)
+3. Run full detail flow for the most recently modified ticket
+4. Ask: "Want detail on another ticket?"
 
 ---
 
@@ -81,21 +96,17 @@ Showing detail for GEN-2759. Ask for another ticket if needed.
 
 ---
 
-## Step 2: Read Local Artifacts
+## Step 2: Extract From Local Artifacts (targeted — never read large files in full)
 
-Read everything in `tickets/{TICKET_KEY}/`:
+A status check needs ~15 facts, but a mature ticket carries thousands of lines. Run the bundled extractor — it emits every fact this step and Step 6 need, clearly sectioned:
 
-| File | What it tells you |
-|------|-------------------|
-| `rca.md` | Root cause, currency classification, Confluence URL |
-| `spec.md` | Fix type (config / code / mixed), repos/files |
-| `deploy.md` | Firebase write steps |
-| `session-log.md` | Every run: action, env, date, paths written |
-| `validation.md` | UAT test scenarios |
-| `rollback.md` | Rollback plan exists |
-| `.last-checked` | Timestamp of last `/task-status` — baseline for "new since" |
-| Any `{TICKET_KEY}-deploy-uat.md` | UAT deploy plan authored by `/prepare-uat` — presence means UAT migration prep is done |
-| `notes/*-apply-findings.md` | Unexpected findings from an `apply-fix` run — see Step 2b |
+```bash
+bash .claude/skills/task-status/scripts/extract.sh {TICKET_KEY}
+```
+
+Sections it returns: FILES (artifact presence = stage signal, incl. `{TICKET_KEY}-deploy-uat.md`), SESSION-LOG RUNS (env/date/action per run — latest per env wins), LATEST RUN SECTION (drift-check paths for Step 5), RCA (currency + Confluence URL), SPEC (fix type + repos), VALIDATION SCENARIOS (Step 7 titles), NOTES first-3-lines (Step 2b), LAST-CHECKED (baseline), GIT COMMITS (Step 6).
+
+Never Read a large artifact (>~150 lines) in full; if a script section is ambiguous AND the ambiguity changes the status card, run one narrow follow-up grep — not a full Read.
 
 **Baseline date for "new since last check":**
 - `.last-checked` → use its timestamp
@@ -123,11 +134,17 @@ If notes exist but have all been acknowledged in session-log.md, omit from the s
 
 ---
 
-## Step 3: Fetch Fresh Jira Data
+## Step 3: Fetch Fresh Jira Data (fields-scoped — the Jira payload is this skill's biggest cost)
+
+A bare `getJiraIssue` returns the full description, every comment ever written, and rendered bodies — on a long-lived ticket that's tens of thousands of tokens, most of it older than the baseline and therefore already processed on a previous check. Scope the request:
 
 ```
-getJiraIssue(cloudId: "invocarecompass.atlassian.net", issueIdOrKey: "{TICKET_KEY}")
+getJiraIssue(cloudId: "invocarecompass.atlassian.net", issueIdOrKey: "{TICKET_KEY}",
+             fields: ["summary","status","assignee","priority","labels","updated",
+                      "issuelinks","comment","customfield_10020"])   // 10020 = sprint
 ```
+
+Comment discipline: the response returns comments oldest-first — **process only those with `created`/`updated` newer than the baseline**; skim newest-first and stop at the first comment older than baseline. Never summarize, classify, or re-read pre-baseline comments — they were handled on the run that set the baseline. Do not request or read the ticket description at all: the status card never uses it (local rca.md already owns the problem statement).
 
 Extract:
 - Status, assignee, last updated, **priority**, **labels**, **sprint name + end date**
@@ -158,15 +175,11 @@ Extract:
 
 ---
 
-## Step 4: Check Confluence
+## Step 4: Check Confluence (skip when the answer is already known)
 
-Use Confluence URL from `rca.md` if present. Otherwise:
-```
-searchConfluenceUsingCql(cql: 'title ~ "{TICKET_KEY}" AND type = page')
-```
-
-If found: check for comments newer than baseline, classify same as Jira.
-If not found: note "RCA not yet published to Confluence".
+- URL in `rca.md` (or cached in `.last-checked`) → fetch that page's comments newer than baseline, classify same as Jira. No search.
+- No URL AND no dev apply yet → the RCA is simply not published yet; note "RCA not yet published to Confluence" and **do not search** — an unpublished early-stage ticket returns nothing, every time.
+- No URL but fix already applied somewhere → one CQL search: `searchConfluenceUsingCql(cql: 'title ~ "{TICKET_KEY}" AND type = page')`. Cache the outcome (URL or `none`) in `.last-checked` (Step 9) so future runs never repeat the search.
 
 ---
 
@@ -176,7 +189,7 @@ Skip if: code-only fix, or no apply runs in session-log.
 
 **Read-only, dev-only** (per `firebase-safety.md`): this check only *reads* the dev environment — never `query` other envs and never any write tool. State the DB per path (RTDB vs Firestore) and use the matching read tool; the rows below assume RTDB, so use `query_firestore` instead when `session-log.md` records the path as a Firestore write.
 
-For each path in the most recent dev apply, re-query dev with the read tool for that path's DB:
+Spot-check, don't audit: re-query **at most 4 signature paths** from the most recent dev apply (pick the ones whose values define the fix — a full re-verification belongs to `/apply-fix`, not a daily status check). Issue the queries **in parallel in one turn**, using the read tool for each path's DB:
 ```
 query_rtdb(path: "{PATH}", environment: "dev")
 ```
@@ -191,30 +204,7 @@ query_rtdb(path: "{PATH}", environment: "dev")
 
 ## Step 6: Check Git Commits (code / mixed fixes only)
 
-```bash
-# BASE resolves to $INVOCARE_ROOT if set, otherwise the current working directory.
-# Run /task-status from the project root, or set INVOCARE_ROOT in your shell.
-BASE="${INVOCARE_ROOT:-$(pwd)}"
-REPOS="FCRM-Web FCRM-Cloud-Functions FCRM-Cloud-App FCRM-Exports-API FCRM-Reports-API \
-       FCRM-Email-API FCRM-Files-API Barndoor-Auth-App Barndoor-Batch-App"
-found=0
-total=0
-for repo in $REPOS; do
-  total=$((total+1))
-  if [ -d "$BASE/$repo/.git" ]; then
-    found=$((found+1))
-    git -C "$BASE/$repo" log --all --oneline --grep="{TICKET_KEY}" \
-      | sed "s/^/$repo: /"
-  else
-    echo "$repo: (not present locally — skipping)"
-  fi
-done
-if [ "$found" -eq 0 ]; then
-  echo ""
-  echo "⚠️  0 of $total repos resolved under \$BASE=$BASE"
-  echo "    Set INVOCARE_ROOT to your project root, or run /task-status from inside it."
-fi
-```
+Already covered: the GIT COMMITS section of the Step 2 `extract.sh` output scans all nine repos (`FCRM-*`, `Barndoor-*`) — do not run a separate git pass.
 
 Per repo:
 - Commit found → `{REPO}: {HASH} {MESSAGE} ({DATE} on {BRANCH})`
@@ -227,7 +217,7 @@ If no rows from any repo: "No commits found for {TICKET_KEY}".
 
 ## Step 7: UAT Checklist (if validation.md exists)
 
-Extract each test scenario. Cross-reference against new Jira comments:
+Use the VALIDATION SCENARIOS section of the `extract.sh` output (titles only; never read validation.md in full). Cross-reference against new Jira comments:
 - Comment confirms scenario → ✅
 - Otherwise → ⬜
 
@@ -285,7 +275,7 @@ Baseline: {BASELINE_DATE}
 
 {IF unread apply-findings:}
 ⚠️  Apply findings from {DATE} ({ENV}): {summary} — UNREAD
-    Resolve before promoting: read `tickets/{TICKET_KEY}/notes/{filename}` then acknowledge in session-log.md
+    Resolve the unread finding before promotion, then record the acknowledgement.
 
 ---
 
@@ -338,7 +328,13 @@ Blockers: {BLOCKER_KEY: reason | None}
 
 ## Step 9: Write `.last-checked`
 
-After output, write current timestamp to `tickets/{TICKET_KEY}/.last-checked`.
+After output, write to `tickets/{TICKET_KEY}/.last-checked` a small JSON cache:
+
+```json
+{"ts": "2026-08-22T09:15:00+07:00", "confluence": "{URL or none}"}
+```
+
+`ts` is the "new since" baseline; `confluence` lets Step 4 skip the CQL search forever after. A legacy file containing only a bare timestamp is still a valid baseline — read it as `ts`, upgrade the format on this write.
 
 ---
 
@@ -355,6 +351,7 @@ One sentence. The single most logical next step based on current state:
 | Config drift on dev | "Resolve drift before promoting to UAT" |
 | Dev fix done, no `{TICKET_KEY}-deploy-uat.md` yet | `/prepare-uat {TICKET_KEY}` |
 | Dev fix done, `{TICKET_KEY}-deploy-uat.md` present | `/apply-fix {TICKET_KEY} uat` |
+| QA/UAT rejected the fix (round failed) | `/apply-fix {TICKET_KEY} dev` — next fix round after triaging the failures |
 | UAT done, no Jira comment | `/ticket-comment {TICKET_KEY}` |
 | UAT done, need prod | `/apply-fix {TICKET_KEY} prod` |
 | Done on all envs, RCA not published to Confluence | `/publish-rca {TICKET_KEY}` |
@@ -383,8 +380,13 @@ This table is the **single source of truth** for next-action routing — the `##
 - [ ] Confluence URL surfaced
 - [ ] Single next action stated clearly
 - [ ] Unread apply-findings notes surfaced as ⚠️ if any exist (Step 2b)
-- [ ] `.last-checked` written after output
+- [ ] `.last-checked` written after output (JSON: ts + confluence)
 - [ ] No tool names, session IDs, or automation language in any output
+- [ ] No large artifact (>~150 lines) was Read in full — targeted extraction only (Step 2)
+- [ ] Confluence CQL search ran at most once per ticket lifetime (Step 4 skip rules honored)
+- [ ] Jira fetched fields-scoped; no pre-baseline comment was processed (Step 3)
+- [ ] Config drift capped at ≤4 signature paths, queried in parallel (Step 5)
+- [ ] Steps ran as the two parallel batches (~4–6 tool calls total); extract.sh used, no hand-written extraction greps
 
 ## Next step
 

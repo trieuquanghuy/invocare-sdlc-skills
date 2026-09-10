@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 1180" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#374151"/>
+    </marker>
+    <style>
+      .title { font-size: 20px; font-weight: 700; fill: #111827; }
+      .section { font-size: 15px; font-weight: 600; fill: #111827; }
+      .label { font-size: 13px; fill: #111827; }
+      .small { font-size: 11px; fill: #4b5563; }
+      .process { fill: #dbeafe; stroke: #2563eb; stroke-width: 1.5; }
+      .decision { fill: #fef3c7; stroke: #d97706; stroke-width: 1.5; }
+      .block { fill: #fee2e2; stroke: #dc2626; stroke-width: 1.5; }
+      .pass { fill: #dcfce7; stroke: #16a34a; stroke-width: 1.5; }
+      .hook { fill: #ede9fe; stroke: #7c3aed; stroke-width: 1.5; }
+      .arrow-line { stroke: #374151; stroke-width: 1.5; fill: none; }
+      .arrow-label { font-size: 11px; fill: #4b5563; font-weight: 600; }
+    </style>
+  </defs>
+
+  <text x="440" y="35" text-anchor="middle" class="title">Code-Lessons Gate — Hook Flow</text>
+
+  <!-- ============= MAIN FLOW ============= -->
+  <text x="40" y="70" class="section">A. Edit/Write/MultiEdit flow</text>
+
+  <!-- 1. Start -->
+  <rect x="340" y="85" width="200" height="40" rx="20" class="process"/>
+  <text x="440" y="110" text-anchor="middle" class="label">Claude attempts Edit / Write</text>
+  <path d="M440,125 L440,150" class="arrow-line" marker-end="url(#arrow)"/>
+
+  <!-- 2. PreToolUse hook -->
+  <rect x="310" y="150" width="260" height="50" rx="6" class="hook"/>
+  <text x="440" y="172" text-anchor="middle" class="label">PreToolUse hook</text>
+  <text x="440" y="190" text-anchor="middle" class="small">check-lessons-fetched.sh</text>
+  <path d="M440,200 L440,225" class="arrow-line" marker-end="url(#arrow)"/>
+
+  <!-- 3. Decision 1: skip list -->
+  <polygon points="440,230 570,280 440,330 310,280" class="decision"/>
+  <text x="440" y="275" text-anchor="middle" class="label">file_path in</text>
+  <text x="440" y="290" text-anchor="middle" class="label">skip list?</text>
+
+  <path d="M570,280 L640,280" class="arrow-line" marker-end="url(#arrow)"/>
+  <text x="600" y="273" text-anchor="middle" class="arrow-label">yes</text>
+
+  <!-- silent pass box (top) -->
+  <rect x="640" y="260" width="180" height="40" rx="20" class="pass"/>
+  <text x="730" y="285" text-anchor="middle" class="label">exit 0 (silent allow)</text>
+
+  <path d="M730,300 L730,355" class="arrow-line" marker-end="url(#arrow)"/>
+
+  <rect x="640" y="360" width="180" height="40" rx="20" class="pass"/>
+  <text x="730" y="385" text-anchor="middle" class="label">Tool runs normally</text>
+
+  <!-- no branch down -->
+  <path d="M440,330 L440,355" class="arrow-line" marker-end="url(#arrow)"/>
+  <text x="455" y="350" class="arrow-label">no</text>
+
+  <!-- 4. Decision 2: sentinel -->
+  <polygon points="440,360 590,410 440,460 290,410" class="decision"/>
+  <text x="440" y="402" text-anchor="middle" class="label">both -high AND -medium</text>
+  <text x="440" y="418" text-anchor="middle" class="label">sentinels exist?</text>
+  <text x="440" y="435" text-anchor="middle" class="small">…-$SID-&lt;lang&gt;-&lt;severity&gt;</text>
+
+  <!-- yes branch right, joins top silent allow -->
+  <path d="M590,410 L630,410 L630,300 L640,300" class="arrow-line" marker-end="url(#arrow)"/>
+  <text x="605" y="403" class="arrow-label">yes</text>
+
+  <!-- no branch down -->
+  <path d="M440,460 L440,490" class="arrow-line" marker-end="url(#arrow)"/>
+  <text x="455" y="480" class="arrow-label">no</text>
+
+  <!-- 5. Block -->
+  <rect x="270" y="495" width="340" height="60" rx="6" class="block"/>
+  <text x="440" y="517" text-anchor="middle" class="label" font-weight="600">Return { decision: "block", reason: "..." }</text>
+  <text x="440" y="538" text-anchor="middle" class="small">Reason names missing severities + asks for TWO list calls</text>
+
+  <path d="M440,555 L440,585" class="arrow-line" marker-end="url(#arrow)"/>
+
+  <!-- 6. Claude skims at both severities -->
+  <rect x="270" y="590" width="340" height="55" rx="6" class="process"/>
+  <text x="440" y="612" text-anchor="middle" class="label">Claude calls list_lessons_for_stack(...) ×2</text>
+  <text x="440" y="630" text-anchor="middle" class="small">once with severity:"high", once with severity:"medium"</text>
+
+  <path d="M440,645 L440,670" class="arrow-line" marker-end="url(#arrow)"/>
+
+  <!-- 7. PostToolUse -->
+  <rect x="270" y="675" width="340" height="55" rx="6" class="hook"/>
+  <text x="440" y="697" text-anchor="middle" class="label">PostToolUse hook (per skim call)</text>
+  <text x="440" y="715" text-anchor="middle" class="small">mark-lessons-fetched.sh → touch …-&lt;lang&gt;-&lt;severity&gt;</text>
+
+  <path d="M440,730 L440,755" class="arrow-line" marker-end="url(#arrow)"/>
+
+  <!-- 8. Retry -->
+  <rect x="270" y="760" width="340" height="55" rx="6" class="process"/>
+  <text x="440" y="782" text-anchor="middle" class="label">Claude retries the Edit</text>
+  <text x="440" y="800" text-anchor="middle" class="small">PreToolUse fires again → both sentinels exist → silent pass</text>
+
+  <!-- arrow back to tool runs - dashed -->
+  <path d="M610,787 L730,787 L730,400" class="arrow-line" stroke-dasharray="5,3" marker-end="url(#arrow)"/>
+  <text x="670" y="780" class="arrow-label">retry</text>
+
+  <!-- ============= COMPACTION FLOW ============= -->
+  <line x1="40" y1="850" x2="840" y2="850" stroke="#d1d5db" stroke-width="1"/>
+  <text x="40" y="885" class="section">B. Context compaction flow</text>
+
+  <rect x="40" y="910" width="200" height="50" rx="6" class="process"/>
+  <text x="140" y="932" text-anchor="middle" class="label">Conversation grows long</text>
+  <text x="140" y="950" text-anchor="middle" class="small">Harness triggers compaction</text>
+
+  <path d="M240,935 L275,935" class="arrow-line" marker-end="url(#arrow)"/>
+
+  <rect x="275" y="910" width="270" height="50" rx="6" class="hook"/>
+  <text x="410" y="932" text-anchor="middle" class="label">PreCompact hook</text>
+  <text x="410" y="950" text-anchor="middle" class="small">clear-lessons-sentinel.sh → rm sentinels (glob)</text>
+
+  <path d="M545,935 L580,935" class="arrow-line" marker-end="url(#arrow)"/>
+
+  <rect x="580" y="910" width="250" height="50" rx="6" class="process"/>
+  <text x="705" y="932" text-anchor="middle" class="label">Compaction proceeds</text>
+  <text x="705" y="950" text-anchor="middle" class="small">Next Edit → gate fires fresh</text>
+
+  <!-- ============= LEGEND ============= -->
+  <line x1="40" y1="1000" x2="840" y2="1000" stroke="#d1d5db" stroke-width="1"/>
+  <text x="40" y="1030" class="section">Legend</text>
+
+  <rect x="40" y="1045" width="22" height="16" rx="3" class="process"/>
+  <text x="70" y="1058" class="label">Claude action / system event</text>
+
+  <rect x="270" y="1045" width="22" height="16" rx="3" class="hook"/>
+  <text x="300" y="1058" class="label">Hook script</text>
+
+  <polygon points="465,1045 487,1053 465,1061 443,1053" class="decision"/>
+  <text x="500" y="1058" class="label">Decision</text>
+
+  <rect x="600" y="1045" width="22" height="16" rx="3" class="block"/>
+  <text x="630" y="1058" class="label">Block / intervention</text>
+
+  <rect x="40" y="1075" width="22" height="16" rx="3" class="pass"/>
+  <text x="70" y="1088" class="label">Pass / silent allow / success</text>
+
+  <text x="40" y="1130" class="small">$SID = session_id from hook stdin JSON. &lt;lang&gt; = inferred from file extension. &lt;severity&gt; ∈ {high, medium}. Sentinels are zero-byte marker files in /tmp/, one per (session, language, severity).</text>
+</svg>

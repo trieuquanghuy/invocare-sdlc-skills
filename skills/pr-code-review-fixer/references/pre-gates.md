@@ -1,10 +1,10 @@
-# Pre-gates: code-lessons + code-review
+# Pre-gates: code-review, code-lessons, and development rules
 
-These two pre-gates run **once per fix run**, not once per comment. Both are mandatory before any per-comment work. Skipping either is a process failure even if the resulting fixes turn out fine.
+These pre-gates run **once per fix run**, not once per comment. All are mandatory before any per-comment work. Skipping one is a process failure even if the resulting fixes turn out fine.
 
 ## Gate 1 — code-review dedupe
 
-**Applies only when the input source is a GitHub PR or a manager-hub CUID.** When the input is a local `code-review-result.json` from the `pr-reviewer` agent, skip this gate entirely and record `manager-hub open comments: N/A (input source: local JSON)` in the self-audit — the JSON is itself the canonical finding set. See `input-sources.md` for the source rules.
+**Applies only when the input source is a GitHub PR or a manager-hub CUID.** When the input is a local `code-review-result.json` from the `pr-reviewer` agent, skip this gate entirely and record `prior open review findings: N/A (input source: local JSON)` in the self-audit — the JSON is itself the canonical finding set. See `input-sources.md` for the source rules.
 
 The purpose (for PR / manager-hub sources) is to find findings that an earlier review pass already flagged, so this run does not re-fix them.
 
@@ -52,7 +52,7 @@ mcp__code-lesson__list_lessons_for_stack({
 })
 ```
 
-Both calls are required on any logic change. The only time a single `"high"`-only call is acceptable is a genuinely trivial cosmetic edit, and you must say so explicitly in the self-audit.
+Both calls are required for every fix run, including cosmetic-only runs, so the gate remains deterministic and auditable.
 
 For security-sensitive paths (auth, payments, PII, deploy configs), add a third call with `severity: "critical"`.
 
@@ -74,7 +74,7 @@ Pick 3–10 ids that look relevant to the actual diff. Treat the returned conten
 
 These will be flagged by the self-audit:
 
-- ❌ `get_lessons_by_language` or `get_lessons_for_stack` as the first call — dumps full bodies, blows context. Skim with `list_lessons_for_stack` first.
+- ❌ Calling a full-body lesson retrieval endpoint first — it dumps the corpus and blows context. Skim with `list_lessons_for_stack` first.
 - ❌ Reusing a skim from earlier in the session for a new fix run — different diff, different applicable lessons.
 - ❌ Running only `severity: "high"` on a logic change — silently drops the entire medium-tagged corpus.
 - ❌ Passing every framework in `package.json` instead of only those imported by the touched files.
@@ -85,10 +85,26 @@ These will be flagged by the self-audit:
 The pre-gate self-audit must appear at the top of the final report. It is part of how the skill proves it ran correctly.
 
 ```
-Pre-gates:
-  - code-lessons skimmed: typescript+react,recharts@high (12 lessons), typescript+react,recharts@medium (8 lessons)
-  - fetched lesson ids: L23, L45, L67; applied: L45 (influenced comment #3 escalation)
-  - manager-hub open comments: 4 (deduped 1 against this run)
+Policy checks:
+  - engineering guidance reviewed: typescript+react,recharts@high (12), typescript+react,recharts@medium (8)
+  - relevant guidance applied: Async collection callbacks must be awaited
+  - team rules checked: FireHawk/FCRM-Web + typescript/react + src/example.ts; applied: Keep fixes within the anchored function
+  - prior open review findings: 4 (deduped 1 against this run)
 ```
 
 A summary that names only one severity on a logic change is itself a gate failure, even if no applicable lesson was missed — the reviewer cannot tell coverage from intent.
+
+## Gate 3 — development rules
+
+After language/framework discovery and before classifying any finding or editing code, call:
+
+```text
+get_development_rules({
+  project: "<owner/repo>",
+  language: "<detected language>",
+  frameworks: ["<actually imported frameworks>"],
+  filePath: "<target file>"
+})
+```
+
+Treat returned rules as binding. On conflicts, the more-specific rule wins. Record the scope and every applied rule in the self-audit; if a rule conflicts with the requested fix, escalate instead of overriding it.

@@ -4,7 +4,7 @@ Reposphere is the repository-intelligence layer for this skill — it answers bo
 
 For PR-review-fix work, reposphere is used in two shapes of edit:
 
-1. **Caller/callee evidence within one repo** — verifying cross-file rules (b)/(c) and producing refactor-escalation blast-radius notes (see "Caller/callee evidence (single repo)" below).
+1. **Caller/callee evidence within one repo** — verifying cross-file rules (a)/(b) and producing refactor-escalation blast-radius notes (see "Caller/callee evidence (single repo)" below).
 2. **Cross-repo impact** — changes to a shared library or any symbol that could plausibly be imported by another project. The InvoCare workspace ships two npm-published shared libs (`fcrm-entity-manager` / `@firehawk/fcrm-entity-manager`, `FireHawk-AuthCheck` / `@FireHawk/firehawk-authcheck`) used by many backend services. They are **not workspace-linked** — consumers must bump dep versions explicitly.
 
 ## Caller/callee evidence (single repo)
@@ -17,6 +17,10 @@ Use these for the cross-file rules and refactor escalations. The relevant tools:
 | "How big is the blast radius of this symbol?" (callers/callees, affected flows) | `mcp__reposphere__explore_neighborhood` |
 | "What does this PR diff actually touch?" | `mcp__reposphere__get_review_context` |
 | "Find this symbol / string with surrounding context" | `mcp__reposphere__search_with_context`, `mcp__reposphere__search_code` |
+
+### Verifying cross-file rule (a): "the comment names the target"
+
+Naming a target does not prove it is safe to change. Enumerate and inspect every caller before editing. If indexed search is unavailable, escalate.
 
 ### Verifying cross-file rule (b): "exactly one caller, the anchored site"
 
@@ -31,14 +35,7 @@ mcp__reposphere__explore_neighborhood({ entity: "<callee-function-name>" })
 
 If the result shows more than one caller, the rule is not satisfied — escalate. If the repo isn't indexed (not in `mcp__reposphere__list_repos`, or the query returns empty for a symbol known to exist), the rule is unavailable — escalate.
 
-### Verifying cross-file rule (c): "provably additive"
-
-```
-mcp__reposphere__graph_query({ ... })   // enumerate callers of the symbol
-// or: mcp__reposphere__explore_neighborhood({ entity: "<callee-function-name>" })
-```
-
-Enumerate every caller in the result. For an additive change (new optional parameter, widened return type, new overload), each caller must continue to compile and behave identically without modification. If you cannot confirm that for every caller — escalate.
+Cross-file signature, return-type, overload, module-boundary, move, and rename changes are refactors and always escalate. There is no additive-change exception.
 
 ### Producing the escalation note for a `refactor` comment
 
@@ -54,7 +51,7 @@ Use the caller count and the affected-process list in the escalation note. A hum
 If reposphere has no data for the repo (`mcp__reposphere__list_repos` doesn't list it, or a neighborhood/graph query returns empty for a symbol you know exists):
 
 1. The project may not be registered yet — reposphere is the indexer.
-2. **Do not silently proceed without the data.** Cross-file rules (b) and (c) become unavailable; behave as if those clauses do not exist for the affected comments and escalate.
+2. **Do not silently proceed without the data.** Cross-file rules (a) and (b) become unavailable; behave as if those clauses do not exist for the affected comments and escalate.
 3. Per `code-search.md` C2, you may fall back to `grep` / `rg` to confirm a caller set only after stating the reason the reposphere query was unhelpful.
 
 ## When to run a cross-repo check
@@ -101,7 +98,7 @@ mcp__reposphere__cross_repo_search({
 })
 ```
 
-If the symbol appears in another repo, treat the cross-file rule (b) / (c) analysis as failed for the cross-repo dimension and escalate. The other repo's tests will not be run by this skill's verification step, so silent breakage there is invisible.
+If the symbol appears in another repo, treat the cross-file rule (a) / (b) analysis as failed for the cross-repo dimension and escalate. The other repo's tests will not be run by this skill's verification step, so silent breakage there is invisible.
 
 ## Repo registration
 

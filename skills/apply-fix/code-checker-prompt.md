@@ -56,11 +56,12 @@ This checker is distinct from the config-fix pre-flight checker (`./checker-prom
 ### CR3 — Working tree dirty
 
 - **Detection:** `git status --porcelain` shows untracked or modified files NOT mentioned in spec.md's Code Changes section (i.e. unrelated work-in-progress)
-- **Severity:** blocker
+- **Classify first (per `.claude/rules/local-dev-overrides.md`):** pre-existing run-local config modifications — `environment*.ts`, `environment.local-*`, `package.json`, `package-lock.json`, `.nvmrc`, `.gitignore`, `*.local.*` — are expected local noise on this machine (FCRM-Web is permanently dirty by design). They do NOT trigger this rule; report them as one info line: `pre-existing local dev overrides present (<N> files) — ignored`. Never suggest stashing, reverting, or committing them.
+- **Severity:** blocker (for genuinely unrelated source changes only)
 - **Issue text:** `Working tree has <N> uncommitted change(s) outside the spec's Code Changes scope: <first 5 paths>. Mixing unrelated work with the fix obscures the diff.`
 - **Suggested fix:** `Commit or stash the unrelated changes (git stash push -u) before re-running /apply-fix.`
 - **Fixable:** false
-- **Skip when:** every dirty path appears in spec.md's Code Changes list (mid-implementation re-run is OK)
+- **Skip when:** every dirty path appears in spec.md's Code Changes list (mid-implementation re-run is OK) OR every remaining dirty path is a local dev override per the classification above
 
 ### CR4 — Files spec.md plans to modify don't exist
 

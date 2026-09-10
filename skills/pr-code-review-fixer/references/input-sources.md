@@ -4,7 +4,7 @@ This skill processes review comments from three sources. The per-comment fix loo
 
 ## Source 1 — GitHub PR
 
-Identified by PR number, full URL, or a branch with an open PR. The comment list is `gh pr view <n> --comments`. Phase 0 step 1 runs in full: `mh_list_open_prs` to find the manager-hub CUID, then `get_open_comments(pullRequestId)` to dedupe against findings already flagged upstream.
+Identified by PR number, full URL, or a branch with an open PR. Fetch review threads with a read-only `gh api graphql` query for `repository.pullRequest.reviewThreads`, paginating both threads and their comments. For every comment retain `databaseId`, `path`, `line`, `originalLine`, `body`, and the parent thread's `isResolved`; ignore resolved threads unless the user explicitly selected their IDs. Refuse to process any comment without a numeric database ID, file path, and current or original line anchor. Phase 0 step 1 runs in full: `mh_list_open_prs` to find the manager-hub CUID, then `get_open_comments(pullRequestId)` to dedupe against findings already flagged upstream.
 
 ## Source 2 — Manager-hub CUID
 
@@ -58,8 +58,9 @@ Each `findings[]` entry becomes one review comment in the per-comment loop. The 
 
 ### Phase 0 differences for this source
 
-- **Step 1 — Manager-hub dedupe: SKIP.** The JSON is the canonical, already-curated finding set from the `pr-reviewer` agent. There is no manager-hub PR to query and no upstream dedupe to perform. Record `manager-hub open comments: N/A (input source: local JSON)` in the self-audit.
+- **Step 1 — Manager-hub dedupe: SKIP.** The JSON is the canonical, already-curated finding set from the `pr-reviewer` agent. There is no manager-hub PR to query and no upstream dedupe to perform. Record `prior open review findings: N/A (input source: local JSON)` in the self-audit.
 - **Step 2 — Code-lessons skim: RUNS NORMALLY.** Identify the language + frameworks of the files referenced by `findings[].file`, then call `list_lessons_for_stack` at both `high` and `medium` severities as usual. The lessons gate is about the code being edited, not where the comments came from.
+- **Step 3 — Development rules: RUNS NORMALLY.** Load project-, stack-, and file-scoped rules before classifying findings or editing code.
 
 ### Suggestions are advisory
 
@@ -88,11 +89,12 @@ Classify by what the comment is asking, not by its severity tag. Use severity fo
 The Phase 0 self-audit at the top of the final report must reflect the source explicitly:
 
 ```
-Pre-gates:
+Policy checks:
   - input source: local JSON (./code-review-result.json) — 12 findings
-  - code-lessons skimmed: typescript+angular,rxjs@high (15 lessons), typescript+angular,rxjs@medium (9 lessons)
-  - fetched lesson ids: L12, L34, L78; applied: L34 (informed comment #F4 escalation)
-  - manager-hub open comments: N/A (input source: local JSON)
+  - engineering guidance reviewed: typescript+angular,rxjs@high (15), typescript+angular,rxjs@medium (9)
+  - relevant guidance applied: Await asynchronous collection callbacks
+  - team rules checked: FireHawk/FCRM-Web + typescript/angular + src/example.ts; applied: Keep fixes within the anchored function
+  - prior open review findings: N/A (input source: local JSON)
 ```
 
 ### End-to-end workflow

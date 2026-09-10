@@ -1,8 +1,8 @@
 # Firebase DB Map — InvoCare
 
-**Last refreshed:** 2026-05-17 (live probe against `dev` AND `uat`)
+**Last refreshed:** 2026-08-22 (live probe against `dev` AND `uat`)
 **Source envs:** dev (`firehawk-ivc-dev`) and uat (`firehawk-ivc-test`); structure ~95% identical with explicit dev/uat-only annotations below.
-**Note:** firebase-explorer has dev + uat only — no prod environment registered. RTDB root query (`path: "/"`) is blocked server-side; enumerate top-level keys via the curated list below or by probing each root with `query_rtdb shallow=true`.
+**Note:** dev, uat, and prod connections are registered; this map refresh probes dev + uat only. RTDB root query (`path: "/"`) is blocked server-side; enumerate top-level keys via the curated list below or by probing each root with `query_rtdb shallow=true`.
 
 **Usage:** Before any Firebase read/write, look up the path here. If listed → use the stated DB. If not → query both, append to `## Discovered paths` (`path | DB | first-seen | last-verified | source: {TICKET_KEY}`).
 
@@ -23,7 +23,7 @@ These root names exist in **both** RTDB and Firestore with different schemas. Us
 
 **Top-level roots:** `core`, `teams`, `clients`, `events`, `documents`.
 
-**Inside `/core`** (25 keys on dev, 26 on uat): `article-builder`, `automation`, `boards`, `clientTypes`, `countries`, `customForms`, `dashboard`, `email-templates`, `emailTemplates`, `external-portal`, `field-mapping`, `finance`, `forbidden-slugs`, `forbidden-usernames`, `forms`, `funeral`, `funeral-transfers`, `funerals`, `hospitals`, `integrations`, `menu`, `onboarding` (uat only), `stylesheets`, `support`, `templates`, `twig-mappings`.
+**Inside `/core`** (26 keys on dev, 25 on uat): `article-builder`, `automation`, `boards`, `clientTypes`, `countries`, `customForms`, `dashboard`, `email-templates`, `emailTemplates`, `external-portal`, `field-mapping`, `finance`, `forbidden-slugs`, `forbidden-usernames`, `forms`, `funeral`, `funeral-transfers`, `funerals`, `hospitals`, `integrations`, `menu`, `onboarding` (dev only), `stylesheets`, `support`, `templates`, `twig-mappings`.
 
 ### Common RTDB paths
 
@@ -44,7 +44,7 @@ These root names exist in **both** RTDB and Firestore with different schemas. Us
 
 ## Firestore
 
-**137 collections across both envs** (dev: 133, uat: 118; probed 2026-05-17). Most are present in both; differences are annotated `(dev)` or `(uat)` below. Query the named collection directly with `query_firestore`.
+**Firestore root collections:** dev 150, uat 136 (probed 2026-08-22). Most are present in both; the categorized list below is curated and may omit newly discovered collections. Query the named collection directly with `query_firestore`.
 
 - **Identity / users:** `users`, `user-roles`, `user-role-assignments`, `user-roles-assignments`, `user-sessions` (dev), `user-invitations`, `user-favourites`, `user-qualifications`, `user-qualification-assignments`, `external-users`, `scim-tokens`, `password-reset-requests`, `verify-email`, `email-verification` (uat)
 - **Org / teams / portals:** `teams`, `team-actions`, `team-emails`, `team-portals`, `team-tax-rates`, `external-portals`, `staged-team-actions` (uat)
@@ -82,3 +82,4 @@ Append rows here when an investigation hits a path not listed above.
 | `core/funerals/hybrid-events/vic-contacts/forms/death-certificate/fields/{index}` | RTDB | 2026-06-09 | 2026-06-09 | GEN-2823 (VIC death-cert form field node; `mappedFields` array maps form keys → quote/estimate slots. `certifiedDeathCertificateCost` at index 10 on dev+uat; write the array via update_partial at the parent `fields/{index}` — a leaf write to `…/mappedFields` returns HTTP 400) |
 | `core/templates/contact/client-create-modal-form/fields/{index}` | RTDB | 2026-06-09 | 2026-06-09 | GEN-2870 (base Add-Contact relationship picker; `relationshipToClient` at fields/4 holds 62-entry plain-string `options` array. Re-write the whole array via update_partial at parent `fields/{index}`) |
 | `forms/custom/{teamId}/{contactOverrideKey}/fields/{index}` | RTDB | 2026-06-09 | 2026-06-09 | GEN-2870 (per-team Add-Contact override; `optionValues` is a 63-entry object array {label,type,value} with IVC-only `Self`. IVC has TWO copies: key `contact-modal` (Self@47) and a push-id key e.g. `-OLX4gWcwmPo9VQw6xxU` (Self@51) — both must be patched. Re-write the full array via update_partial at parent `fields/{index}`) |
+| `core/funerals/teams/{team}/events/transfer/forms/transfer-details-{state}/fields/{index}/relation/{n}` | RTDB | 2026-08-22 | 2026-08-22 | GEN-3167 (per-state Transfer Details form; nine independent forms — eight AU states plus `transfer-details` for NZ. `fields[]` and each field's `relation[]` are element-addressable by numeric index and writable via update_full at the relation-entry path. Indexes differ per state — resolve by `key` / relation `id`, never by reusing another state's position. Firestore `core/funerals/teams/invocare-au/events/transfer/forms` returns 0 documents) |

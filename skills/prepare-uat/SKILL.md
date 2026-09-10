@@ -155,8 +155,8 @@ Treat the user's response as authoritative — **do not scrape Jira's developmen
 
 If the user provides URL(s):
 
-1. For each PR URL, optionally enrich via `gh pr view <url> --json number,state,baseRefName,headRefName,mergedAt,title,files`. If `gh` is unavailable or the call fails, capture only the URL and ask the user for the status (`merged` / `open` / `closed`).
-2. Capture: PR URL, title, status, source branch, target branch, list of changed files (truncated to ~10 with a `+N more` suffix if needed).
+1. For each PR URL, optionally enrich via `gh pr view <url> --json number,state,title`. If `gh` is unavailable or the call fails, capture only the URL and ask the user for the status (`merged` / `open` / `closed`).
+2. Capture: PR URL and state (title if returned). No changed-file list — the pre-apply check in the deploy file owns PR-state re-confirmation at apply time; a file list captured now would be stale by then anyway.
 3. The captured PR list goes into the deploy file's `## Code Dependencies` section (Step 5).
 
 If the user replies `none`:
@@ -170,7 +170,7 @@ If the user replies `none`:
 
 For every concrete change pulled from the Confluence page, classify:
 
-1. **Database** — `RTDB` or `Firestore`. The Confluence page should state this. If ambiguous, query both and confirm where the path actually lives:
+1. **Database** — `RTDB` or `Firestore`. The Confluence page should state this. If ambiguous, query both **in the same turn** (issue the two calls in parallel, never sequentially) and confirm where the path actually lives:
    ```
    query_rtdb(environment_name: "uat", path: "{PATH}")
    query_firestore(environment_name: "uat", path: "{PATH}")
@@ -178,7 +178,7 @@ For every concrete change pulled from the Confluence page, classify:
    Pick whichever returns data. **Never guess** — using the wrong tool silently writes nothing or to the wrong system.
 2. **Operation** — `create` / `update_partial` / `update_full` / `delete`. Default to `update_partial` when only specific fields change.
 3. **Path stability** — note any segments that look env-specific (UUIDs, push IDs). For each, record the lookup query the deployer needs to run on UAT before substituting the ID.
-4. **Current UAT state** — read the path on UAT now and paste the result. This becomes the "before" snapshot. **Read-only** — never write at this stage.
+4. **Current UAT state** — once every path is classified, batch the pre-write reads for ALL paths into ONE parallel turn (one `query_rtdb`/`query_firestore` call per path, issued together) and paste each result. This becomes the "before" snapshot. **Read-only** — never write at this stage.
 
 ---
 
@@ -226,9 +226,9 @@ Required adjustments to the template for this skill:
 
   > The Technical Approach for this fix includes code changes that must be merged and deployed to UAT before applying the config below.
   >
-  > | PR | Title | Status | Branch | Files |
-  > |----|-------|--------|--------|-------|
-  > | [#1234]({PR_URL}) | Fix form validation | merged | feature/xyz → develop | `FCRM-Web/src/forms/FormController.ts`, +2 more |
+  > | PR | Title | Status |
+  > |----|-------|--------|
+  > | [#1234]({PR_URL}) | Fix form validation | merged |
   >
   > **Pre-apply check:** confirm the PR(s) above are merged and deployed to UAT before running `/apply-fix`.
 
@@ -240,13 +240,11 @@ Required adjustments to the template for this skill:
 - **ENV-specific paths** — annotate each affected step with `⚠️ ENV-SPECIFIC: resolve {SEGMENT} on UAT before writing` and place the lookup query inline above the write block.
 - **Current UAT state** — under each write step, paste the pre-write query result inside a `Before:` block so the deployer can compare on rollback. **Exception for template fields** (per Step 4.5f): when a write changes a `template` and/or `styles` field, the `Before:` block carries the integrity record (sha256, size, 10-line excerpt) for those fields only — NOT the verbatim 45 KB string. Sibling fields in the same doc are pasted verbatim as usual.
 - **Template injection in `data: {}` blocks** — when a write step is linked to a Template Artifact row (T1, T2, …) from Step 4.5g, do NOT inline the twig/css content into the `data: {}` block. Use the placeholder syntax `<ARTIFACT {T_id} twig>` and `<ARTIFACT {T_id} css>`. Example: `data: { label: "Memorial Slideshow Cover", template: <ARTIFACT T1 twig>, styles: <ARTIFACT T1 css>, active: true }`. The `<ARTIFACT …>` token is the contract apply-fix consumes — it reads the local file at write time, re-hashes against the Template Artifacts full-sha256 block, and substitutes the content into the actual Firebase write payload. **Never** paste the twig/css body into the deploy markdown — it bloats the file and makes diffs unreadable.
-- **After-state record for update writes** — for every write classified as `update — *` in Step 4.5d, add an `After:` block under the write step, sibling to `Before:`. Its content for the changed template fields is the projected integrity record from Step 4.5c:
+- **After-state record for update writes** — for every write classified as `update — *` in Step 4.5d, add an `After:` block under the write step, sibling to `Before:`. It is a ONE-LINE reference to the Template Artifacts block — never a repeat of the full record:
   ```
-  After-template-sha256: <full 64-char sha256 of new local twig>
-  After-template-excerpt: <first 10 non-blank lines of new local twig>
-  After-template-size: <bytes>
+  After: matches T{id} (twig sha256 {first8}…{last4}, {size} KB)
   ```
-  Same shape for `styles` if css changes. Apply-fix re-verifies these match the local file at write time. The `After:` block lets the deployer confirm rollback comparisons without round-tripping through the local repo.
+  Append `; css sha256 {first8}…{last4}, {size} KB` if css changes too. The full 64-char sha256 + 10-line excerpt + byte size live ONLY in the Template Artifacts block — apply-fix re-verifies the local file against that block at write time, and the deployer follows the `T{id}` pointer for rollback comparisons.
 - **Verification table** — fill from the Confluence page if a Verification section was found; otherwise build at minimum one read query per write to confirm the new value landed. For template-field writes, the `Expected:` column carries the After-sha256 (truncated to `a3f9…2c1b` for readability), so a post-deploy `query_rtdb`/`query_firestore` result can be hashed and compared without inlining 45 KB of expected text. Example expected cell: `sha256 of template field == a3f9…2c1b (T1 twig)`.
 - **Quick Test** — 2–3 plain app actions (e.g. "Open the Funeral form, complete to Page 3, confirm export filename = `Death_Certificate.pdf`"). Never reference internal tools.
 - **Rollback section — REQUIRED, never strip.** Retain the `## Rollback` section from the template and **expand Option B to be per-step** rather than the generic placeholder. The expanded section MUST contain:
@@ -277,7 +275,7 @@ Remove the `## IMPORTANT RULES` block and any unused template comments — the s
 
 ## Step 6: Output Guardian Pass
 
-Re-read the file you just saved and strip anything that violates `.claude/rules/output-guardian.md`:
+Run this pass — together with the Step 6.6 Quality Bar walk — against the **in-context draft BEFORE saving** in Step 5, then do a single re-read of the saved file only to confirm the write landed as drafted. Strip anything that violates `.claude/rules/output-guardian.md`:
 - No tool names (`firebase-explorer`, `mcp__...`, `getConfluencePage`, etc.) anywhere in the saved file
 - No session IDs or run numbers
 - No "AI investigated" / "Claude confirmed" / "queried via" phrasing
@@ -297,7 +295,7 @@ The only allowed tool references are inside fenced `query_rtdb` / `query_firesto
 
 Skip entirely when Step 4.5 was skipped (no template references). Otherwise, opt-in per run — never automatic.
 
-**Procedure:** [drive-upload-template-assets.md](./references/drive-upload-template-assets.md) — cached-folder vs first-time-setup prompts (6.5.0), per-file collision detection with replace/keep-both/skip (6.5.ii), upload via `create_file` (6.5.iii), update the saved deploy file's Template Artifacts table with Drive URLs or skip/fail verdicts (6.5.iv), failure handling.
+**Procedure:** [drive-upload-template-assets.md](./references/drive-upload-template-assets.md) — cached-folder vs first-time-setup prompts (6.5.0), batched collision detection with one consolidated replace/keep-both/skip prompt (6.5.ii), upload via `create_file` (6.5.iii), update the saved deploy file's Template Artifacts table with Drive URLs or skip/fail verdicts (6.5.iv), failure handling.
 
 **Config key:** `template_assets_parent_folder_id` in `.claude/skills/_shared/config/drive.json` (NOT the `deploy_result_parent_folder_id` key used by `apply-fix` Step 4h). Writes preserve both keys. `drive.json` is created on first Drive-upload setup if it does not yet exist — an absent file is expected on a fresh checkout, not a dead reference.
 
@@ -309,10 +307,10 @@ Skip entirely when Step 4.5 was skipped (no template references). Otherwise, opt
 
 ## Step 6.6: Self-check the Quality Bar
 
-Before handing off, walk every item in this skill's Quality Bar against the saved deploy file. For each item:
+Before handing off, walk every item in this skill's Quality Bar against the **in-context draft, in the same pre-save pass as Step 6** — then save, and re-read the saved file once to confirm the write landed. For each item:
 
 - If it passes, move on.
-- If it fails AND the fix is mechanical (e.g. a DB column blank in the What This Does table, a missing Source/Origin header line, a stray `firebase-explorer` mention the Output Guardian pass missed), apply it now and re-read the file.
+- If it fails AND the fix is mechanical (e.g. a DB column blank in the What This Does table, a missing Source/Origin header line, a stray `firebase-explorer` mention the Output Guardian pass missed), fix it in the draft before saving. No extra re-read after a fix — the Edit tool surfaces its own failures.
 - If it fails AND requires fresh data or judgment (e.g. a path needs a UAT confirmation read, an ambiguous classification was glossed over), STOP and surface the gap to the user before continuing to Step 7.
 
 This pass typically takes 30 seconds. There is no checker subagent for this skill — the deploy file is consumed downstream by `apply-fix`, and any structural defect (missing DB column, missing full-sha256 block, malformed `<ARTIFACT ...>` placeholder) becomes a `Step 4b.0` STOP that wastes a session-create cycle. Catching it here is the only QA gate.
@@ -357,7 +355,7 @@ After saving, tell the user:
 - [ ] No write was executed against Firebase — this skill is read-only on Firebase (Drive uploads in Step 6.5 are opt-in and explicitly approved by the user)
 - [ ] Step 3.5 ran whenever the **Technical Approach** referenced code (file paths with code extensions, GitHub PR URLs, or merge/branch language)
 - [ ] When code references were found: explicitly asked the user for the PR URL(s); did NOT scrape Jira's development panel or any other source
-- [ ] PR metadata (URL, title, status, branch, files) captured via `gh pr view` where available, or via direct ask where it isn't
+- [ ] PR metadata (URL + state, title where available) captured via `gh pr view` or direct ask — no changed-file list; the pre-apply check owns PR-state re-confirmation
 - [ ] `## Code Dependencies` section rendered in the saved deploy file when one or more PRs were captured (or when the user replied `none` despite code references); section omitted entirely when no code references were found
 - [ ] Header carries `**Code PR:**` (or `**Code PRs:**`) line when one or more PRs were captured
 - [ ] **`## Rollback` section is present in the saved deploy file** with Option A (session rollback) and **Option B expanded to per-step manual rollback in REVERSE order**. Every Option B step traces to a `Before:` block in the same deploy file — no invented restore values
@@ -367,14 +365,14 @@ After saving, tell the user:
 
 - [ ] Step 4.5 ran whenever the Technical Approach mentioned `document-templates/{Name}` (case-insensitive substring match)
 - [ ] Every candidate template's local `.twig` and `.css` files were verified to exist; missing files surfaced and resolved before continuing (no silent assumptions)
-- [ ] sha256 and byte size captured for every present file via `shasum -a 256`
+- [ ] sha256 and byte size captured for every present file via the bundled one-liner in Step 4.5b (shasum-based)
 - [ ] Each template classified as `new` / `update — twig only` / `update — css only` / `update — twig + css` / `update — full doc` / `delete`, derived from the linked write operation (no guessing)
 - [ ] Firestore writes that would push the destination document over 900 KB were **stopped** with a clear message; no deploy file produced in that case
 - [ ] RTDB writes over 5 MB warned; user explicitly approved before continuing; warning recorded under deploy file Notes
 - [ ] For every `update — *` template: Before-{field}-sha256, Before-{field}-excerpt (10 non-blank lines), Before-{field}-size captured — verbatim 45 KB strings NEVER pasted into the deploy file
 - [ ] Template Artifacts table rendered in the saved deploy file as `## Template Artifacts` (between `What This Does` and `Environment-Specific IDs`), with truncated sha256 for readability and a full-64-char sha256 block below the table for apply-fix to consume
 - [ ] `data: {}` blocks for template writes use `<ARTIFACT {T_id} twig>` / `<ARTIFACT {T_id} css>` placeholders — the literal twig/css body NEVER appears in the saved deploy file
-- [ ] `After:` integrity record (sha256 + excerpt + size) added under each update write — sibling to `Before:`
+- [ ] One-line `After: matches T{id} (…)` reference added under each update write — sibling to `Before:`; the full integrity record appears only in the Template Artifacts block
 - [ ] Verification table's `Expected:` column for template writes carries the After-sha256 (truncated for readability)
 - [ ] If user opted in to Step 6.5: each uploaded file's Drive URL is captured in the Template Artifacts table; declined/failed/skipped files have an explicit verdict cell (never empty)
 - [ ] `drive.json` write (when first-time setup) merged the new `template_assets_parent_folder_id` without overwriting `deploy_result_parent_folder_id`
@@ -386,27 +384,15 @@ If you catch yourself thinking any of these while writing the deploy file, the n
 
 **General (non-template):**
 
-- "The latest Jira comment is the handoff — I'll fetch that instead of looking up the comment id." → **No.** When `COMMENT_ID` was provided (Branch 2A), locate the comment by that ID. Recency is not a signal — the handoff is the one the URL specifies.
 - "Only one comment has a Confluence link — I'll skip the confirmation and just use it." → **No.** Branch 2B **always** confirms with the user, even on a single candidate. Trusting Confluence means making the source explicit; auto-picking risks silently following a stale or unrelated comment.
-- "Multiple Confluence-link comments — the most recent is probably the right one." → **No.** Present every candidate; let the user pick. Recency is not authoritative.
-- "No comment has a Confluence link, but the ticket description does — I'll use the description's link." → **No.** The skill is comment-based. The description may be stale, unrelated, or written before the fix was finalized. Ask the user where the handoff lives.
 - "The Technical Approach references `FormController.ts` — I'll skim Jira's development panel for the PR." → **No.** Step 3.5 — ask the user. We chose explicit user-provided PR over Jira-dev-panel scraping for accuracy.
 - "The user replied `none` but I can see a recent PR on the ticket in GitHub — I'll add it anyway." → **No.** The user's answer is authoritative. Surface the mismatch in the summary; do not silently override.
-- "The deploy file already has the writes laid out; the deployer can figure out the rollback themselves — I'll strip the `## Rollback` section to keep the file clean." → **No.** The `## Rollback` section is required deliverable content. Strip it and the deployer loses their reverse-order playbook the moment session rollback isn't available.
-- "Option B's per-step manual rollback is just Option A in slow motion; I'll leave it as the generic placeholder." → **No.** Option A depends on the session ID staying valid and the session-rollback path working. Option B is the cold-spare. Render every reverse-order step explicitly, tracing each restore value to a `Before:` block in this same file.
-- "The path looks like a config — that's RTDB. I'll write the deploy plan against `write_rtdb`." → **No.** Step 4. Paths can look identical across RTDB and Firestore. Run both `query_rtdb` and `query_firestore` on UAT; use whichever returns data. Never guess.
-- "The Technical Approach is thin — I'll re-investigate the fix from the codebase to fill the gaps." → **No.** Core principle: trust Confluence; never re-investigate. The Tech Approach is the contract — capture it as-is and note the gap. Re-investigation belongs in `/create-rca`, not here.
-- "The Confluence page links to multiple pages; the first one looks like the right one." → **No.** Step 2. Ask the user which page carries the Technical Approach. The order of links is not authoritative.
 
 **Template artifacts (re-open the Confluence page, re-run Step 4.5, re-render Step 5):**
 
-- "The Technical Approach says the twig content goes here, I'll just paste it inline." → **No.** Step 4.5g defines a `T_id`; Step 5's `data: {}` uses `<ARTIFACT {T_id} twig>`. The deploy file never carries the full twig body.
-- "Apply-fix will read the local file when it runs, so I can leave `template: <twig content>` as a literal placeholder." → **No.** The deploy file IS the contract. Without a Template Artifacts row + full-sha256 block, apply-fix has no integrity hash to verify, no Drive URL to report, and no classification (new vs update).
 - "The css is unchanged for this update, so I'll skip the Template Artifacts row entirely." → **No.** Even an `update — twig only` row carries the `T_id` and the twig file's sha256. The css column reads `(unchanged)`. Skipping the row hides the new content's integrity hash from apply-fix.
-- "The 45 KB Before snapshot is just text — pasting it makes the diff complete." → **No.** Step 4.5f captures sha256 + 10-line excerpt + size for any template field that's about to change. Verbatim strings >8 KB never go into the deploy file.
 - "The Firestore document is currently 700 KB; adding a 250 KB twig will be fine." → **No.** Step 4.5e's budget includes the existing fields plus the projected payload. If the projected total exceeds 900 KB, stop — the pattern needs a Drive-id reference, not inline content. Confirm the storage shape with the BA before re-running.
 - "The Confluence Technical Approach is silent on whether the css is part of the change — I'll assume it is, since the folder has both files." → **No.** Step 4.5d derives classification from the operation, not from disk contents. If the page is ambiguous, ask the user.
-- "Step 6.5 (Drive upload) failed; I'll retry it silently." → **No.** Surface the error verbatim. The user re-runs the upload manually. Apply-fix can still proceed because the local files are the source of truth.
 
 ---
 
@@ -415,16 +401,9 @@ If you catch yourself thinking any of these while writing the deploy file, the n
 | Mistake | What to do instead |
 |---|---|
 | Re-investigating the fix from the codebase because the Confluence page seems thin. | The Technical Approach is the contract — capture it as-is and note any gap. Re-investigation belongs in `/create-rca`, not here. |
-| Fetching the latest Jira comment instead of the one whose `id` matches `COMMENT_ID`. | Step 2 — locate the comment by ID. The latest comment may be a discussion reply, not the Confluence handoff. |
-| Guessing `RTDB` vs `Firestore` from path shape because the Confluence page is ambiguous. | Step 4 — `query_rtdb` AND `query_firestore` on UAT, use whichever returns data. Never guess. |
-| Pasting a 45 KB twig body verbatim into a `data: {}` block. | Use `<ARTIFACT T_id twig>` (Step 4.5g + Step 5). The deploy file carries integrity hashes, never raw template bodies. |
-| Skipping the `Before:` snapshot under a write step because "the deployer can read it themselves". | Step 5 — the `Before:` block is the rollback baseline. For template fields use the sha256+excerpt+size record (Step 4.5f). |
 | Telling the user to promote via a separate migration step. | `/apply-fix` is the canonical apply path (post-2026-05-16). Hand off `Review {TICKET_KEY}-deploy-uat.md, then run /apply-fix {TICKET_KEY} uat`. |
 | Leaving `Drive mirror:` cells in the Template Artifacts table empty when Step 6.5 was declined. | Always carry an explicit verdict: `skipped — user declined`, `failed: <reason>`, or the Drive URL. Empty cells leave the deployer guessing. |
 | Stopping with "URL required" when the user provided only a ticket key. | Branch 2B — scan the ticket's comments for Confluence links and ask the user to pick the handoff. Stop only when zero comments match. |
-| Auto-picking the single Confluence-link comment without asking. | Always confirm. Trusting Confluence means making the source explicit, even on a one-match case. |
 | Falling back to the ticket description's Confluence link when no comment has one. | Step 2 — comments only. Ask the user where the handoff lives; do not pull from the description, linked subtasks, or any other source. |
-| Scraping Jira's development panel to find the PR for UAT. | Step 3.5 — ask the user. We chose explicit ask over dev-panel scraping because PRs in that panel are sometimes stale or unrelated to the fix. |
-| Adding a `## Code Dependencies` section when the Tech Approach did not reference code. | Skip Step 3.5 entirely when no code references are detected. Omit the section. The default deploy file is config-only. |
 | Stripping the `## Rollback` section because the saved file should be "clean". | The `## Rollback` section is required deliverable content (Step 5). Strip the `## IMPORTANT RULES` block and unused template *comments*; never the rollback section. |
 | Leaving Option B in the `## Rollback` section as the generic "for each write above, restore the Before value" placeholder. | Render Option B per-step in REVERSE order. Each step names the path, DB, reverse op, and the captured `Before:` value the deployer writes back. |

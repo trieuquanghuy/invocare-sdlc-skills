@@ -134,9 +134,7 @@ If the doc carries a `## Run N` header for multiple runs, use the **latest** run
 
 ### 3b-ii — Build the full session-state history (`deploy_history[]`)
 
-A `deploy-result.md` is a cumulative ledger: it records every deploy session across all runs, not just the latest. For each ticket that HAS a `deploy-result.md`, build a `deploy_history[]` list — one entry per session — so the report can show the full deploy history inline, not just the collapsed bucket status.
-
-Read the **Session Ledger** section (the `## Session Ledger` heading; "Write sessions" and "Rollback sessions" fenced blocks). Each row there is one session: `action | env | session_id | date | DB`. For every row capture:
+Use the protected local session log as the source of rollback references whenever it exists, even when a deploy result is also present. Read each `## Run N` entry and capture:
 
 | Field | Source | Notes |
 |---|---|---|
@@ -149,12 +147,12 @@ Read the **Session Ledger** section (the `## Session Ledger` heading; "Write ses
 **Session IDs are PUBLISHED inline (release-report carve-out).** Capture each session id and render it inline in its own deploy-history row as the `{session_id}-` prefix on the action field (Step 6). Per the `/create-release-report` carve-out in `output-guardian.md`, these `Deploy history:` rows are the ONE place session IDs are permitted on a Confluence page — on BOTH the local draft and the published page — because they are the per-session rollback reference. Session IDs remain barred everywhere else in the report: they may appear ONLY in `Deploy history:` rows, never in the executive summary, notes, or appendix prose.
 
 Fallbacks:
-- **Dry-run ledger** (`n/a — dry-run (no sessions created)`): record `deploy_history: []` and leave the inline history off — there are no real sessions to list.
-- **No Session Ledger section** (older `deploy-result.md` predating the ledger): synthesise a single entry from the top-level `Target environment` + `Run mode` + `Run date` + bucket status, and note `deploy_history: reconstructed` so Step 6 can flag it.
+- **Dry-run result with no session-log entry:** record `deploy_history: []` and leave the inline history off — there are no real sessions to list.
+- **No session log:** for an older deploy result that contains a Session Ledger, read its rows for backward compatibility. Otherwise synthesize a single entry from the top-level `Target environment` + `Run mode` + `Run date` + bucket status, and note `deploy_history: reconstructed` so Step 6 can flag it.
 
 Order `deploy_history[]` chronologically (oldest run first), so the inline list reads as the deploy progressed.
 
-### 3c — From `session-log.md` (if no deploy-result.md)
+### 3c — Status from `session-log.md` (if no deploy-result.md)
 
 Scan for the latest `## Run N — {ENV} — {DATE TIME}` header (highest N). Read its `Action: …` line:
 
@@ -252,7 +250,7 @@ Within each bucket, sort by ticket key ascending. Tag each entry with its `class
 Write to repo root: `release-report-{YYYY-MM-DD}.md`. Use this structure (mirrors the existing draft conventions; adds a `Type` line per ticket so migration vs. code-only is visible):
 
 ```markdown
-# Release Report — {DD MMM YYYY}
+# Release Report: {DD MMM YYYY}
 
 **Total tickets:** {N}
 **Success:** {S}  ·  **Failed:** {F}  ·  **Pending:** {P}  ·  **Skipped:** {K}
@@ -497,7 +495,7 @@ updateConfluencePage(
 
 After publish succeeds, prepend the Confluence URL to the local file. Edit the local file in place:
 
-After the `# Release Report — {DD MMM YYYY}` heading, insert (if not already present):
+After the `# Release Report: {DD MMM YYYY}` heading, insert (if not already present):
 
 ```markdown
 **Confluence:** [{TITLE}]({CONFLUENCE_PAGE_URL})

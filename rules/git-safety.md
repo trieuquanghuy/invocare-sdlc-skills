@@ -12,29 +12,29 @@ These rules cover the universal git pitfalls. Skill-specific git behavior (branc
 
 **Forbidden commands:** `git push origin main`, `git push origin master`, anything that would update a base branch ref directly.
 
-**Detection:** if the current branch equals the base branch (`main` / `master`), refuse the operation. Skills that need to update base branches do so by merging an approved PR via the team's review tooling, not by direct push.
+**Detection:** inspect every push refspec before execution and refuse when its destination is `main`, `master`, `develop`, or any configured/designated base branch, regardless of the current branch. A feature branch does not authorize pushing its commit to a protected destination ref. Base branches are updated only by merging an approved PR through the team's review tooling.
 
 ---
 
 ## G2 — Never use destructive flags
 
-Forbidden in any push, fetch, or clean command unless the user has typed those exact flags in this turn:
+The following flags and operations are unconditionally forbidden for automated execution. User-supplied flags or confirmation do not authorize a skill or agent to run them:
 
 - `--force`, `-f` (push)
 - `--force-with-lease` (push — slightly safer than `--force` but still rewrites remote history)
 - `--no-verify`, `-n` (commit/push — bypasses pre-commit / pre-push hooks)
 - `--hard` (reset — irrecoverable except via reflog within 30 days)
-- `git clean -f` without a prior `--dry-run` and explicit user confirmation
+- `git clean -f`
 
 **Why these are forbidden:** every one of them either rewrites shared history, bypasses safety nets, or destroys uncommitted work. None of them are appropriate for an automated skill to invoke.
 
-**If a skill encounters a scenario where one of these flags would be useful** (e.g. recovering from a divergent remote), the skill MUST stop, explain the situation, and require the user to run the destructive command manually outside the skill.
+**If a skill encounters a scenario where one of these flags would be useful** (e.g. recovering from a divergent remote), it MUST stop, explain the situation, and require the user to run the destructive command manually outside the skill. The automation never performs the operation itself.
 
 ---
 
 ## G3 — Never amend or rebase commits that have already been pushed to a remote
 
-Once a commit is on origin, history is shared. Amending or rebasing it requires force-push (forbidden by G2). Skills MUST detect divergence (`git rev-list --left-right --count @{u}...HEAD` returning both X > 0 AND Y > 0) and refuse to proceed.
+Once a commit is on any remote, history is shared. Before amend or rebase, enumerate every commit that would be rewritten and check whether it is reachable from any applicable remote ref (for example, with `git branch -r --contains <sha>`). If any remote contains a target commit, refuse. Divergence checks alone are insufficient because an equal or ahead-only branch may still include pushed commits.
 
 If the user genuinely needs to fix a pushed commit, the skill stops and the user makes a NEW commit on top with an explanation.
 
@@ -85,7 +85,7 @@ For each match, the recovery is the same: add the pattern to `.gitignore`, run `
 
 ## G8 — No secret values in the diff
 
-Any git diff that adds a line matching a secret pattern MUST stop the operation. Patterns:
+Before commit, scan added lines in both the working-tree diff and staged index. Before push, also scan the complete outgoing commit range for every destination. Any match MUST stop the operation. Patterns:
 
 - AWS access keys: `AKIA[A-Z0-9]{16}`
 - Slack tokens: `xox[pbar]-`
@@ -103,7 +103,7 @@ When citing the offending line in user-facing output, cite **only the file:line*
 
 ## G9 — Stop on any git or `gh` error; never retry
 
-If a git or `gh` command exits non-zero, the skill stops, surfaces the error verbatim, and exits. It does NOT:
+If a git or `gh` command exits non-zero, the skill stops, redacts credential-bearing URLs and secret-looking values, surfaces the remaining diagnostic text, and exits. It does NOT:
 
 - Retry with the same command
 - Retry with flags removed (e.g. drop `--ff-only` and retry `git pull`)

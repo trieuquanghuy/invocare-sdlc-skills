@@ -15,14 +15,14 @@ This file adds what those don't cover: the per-stage map, the PR-review `code-re
 |-------|------------------|------|--------------------|
 | **S0** Planning / spec | RCA, spec, design — no code edited | none | — |
 | **S1** Implementation (pre-edit) | about to `Edit`/`Write` code | `code-lesson` skim→fetch **before** the edit | `CLAUDE.md` Code-Lessons section + `code-search.md` |
-| **S2** Self-review (pre-commit) | diff written, not yet done | re-skim the same lessons against the diff **AND** re-check it against CQ1–CQ12 | `CLAUDE.md` Code-Lessons section + `code-quality.md` |
+| **S2** Self-review (pre-commit) | diff written, not yet done | re-skim the same lessons against the diff **AND** re-check it against CQ1–CQ13 | `CLAUDE.md` Code-Lessons section + `code-quality.md` |
 | **S3** PR opened (org AI review) | reviewing an open PR | `code-review` 8-step flow (below) | this file |
 | **S4** Addressing PR feedback | pushing fixes to a reviewed PR | `get_open_comments` **AND** the full S1 skim→fetch | `CLAUDE.md` Code-Lessons section |
 | **S5** Merge / post-merge | merging | none (post-merge defect re-enters at S0) | — |
 
 **S1 / S2 / S4 mechanics are NOT repeated here.** The skim is two severity calls (`high` AND `medium`, exclusive filter), then `get_lessons_by_ids`, applied as constraints — see `CLAUDE.md`. The per-task scope, the skip list, and the done-summary self-audit are all defined there too. Running only `high` on a logic change, or reusing a prior task's pull, are gate failures per that section.
 
-S2 has a second, non-lesson companion: re-read the diff against the concrete code-quality standards in `code-quality.md` (CQ1–CQ12) and name the checks applied in the done-summary. The lesson re-skim reports what the org has learned; the CQ self-review reports whether this specific diff is correct, well-built, and in-scope. Both are part of S2.
+S2 has a second, non-lesson companion: re-read the diff against the concrete code-quality standards in `code-quality.md` (CQ1–CQ13) and name the checks applied in the done-summary. The lesson re-skim reports what the org has learned; the CQ self-review reports whether this specific diff is correct, well-built, secure, and in-scope. Both are part of S2.
 
 S4 is the one stage with two distinct required calls: `get_open_comments(pullRequestId)` (manager-hub CUID, not the GitHub number — reports what the reviewer already raised) **plus** the S1 skim→fetch for the new diff scope (reports what the org has learned about this change shape). Neither substitutes for the other.
 

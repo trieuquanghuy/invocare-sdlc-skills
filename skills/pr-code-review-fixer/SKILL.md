@@ -2,6 +2,7 @@
 name: pr-code-review-fixer
 description: Apply fixes for pull request review comments with strict logic preservation. Use this skill whenever the user asks to address, fix, apply, resolve, triage, or process PR review comments, reviewer feedback, code review suggestions, or automated review output — even if they only describe the situation ("we have 20 review comments to address", "the bot left a bunch of comments on my PR", "fix the findings from the pr-reviewer agent") without explicitly asking for help. The skill accepts three input sources: a GitHub PR (number/URL/branch), a manager-hub CUID, or a local `code-review-result.json` produced by the in-repo `pr-reviewer` agent. Especially important in this InvoCare FireHawk / Barndoor workspace because behavior is often steered by Firebase RTDB config rather than code, and ~30 sibling repos can be silently affected by a "local" edit. The skill enforces minimal surgical edits, runs evidence-gathering MCPs (reposphere, firebase-explorer, code-lessons) before classifying each comment, classifies every comment into safe-to-fix vs. escalation-required buckets, and treats refusal as a first-class outcome rather than a fallback.
 argument-hint: "<pr-id-or-url-or-json-path> [--dry-run] [--bucket=cosmetic|local_guard] [--comment-ids=1,2,3|F1,F2]"
+disable-model-invocation: true
 ---
 
 # pr-code-review-fixer
@@ -47,7 +48,7 @@ This skill accepts review comments from three sources. The per-comment loop (Pha
 
 | Source | Phase 0 dedupe (step 1) | Comment list comes from | Comment ID format |
 |---|---|---|---|
-| GitHub PR (number / URL / branch) | `mh_list_open_prs` + `get_open_comments` (manager-hub) | `gh pr view <n> --comments` | numeric GitHub comment IDs |
+| GitHub PR (number / URL / branch) | `mh_list_open_prs` + `get_open_comments` (manager-hub) | Read-only `gh api graphql` review-thread query | numeric GitHub comment database IDs |
 | Manager-hub CUID | `mh_list_open_prs` + `get_open_comments` | manager-hub | manager-hub IDs |
 | `code-review-result.json` from `pr-reviewer` | **Skipped** — note "N/A (input source: local JSON)" in self-audit | `findings[]` array in the JSON | `findings[].id` (e.g. `F1`, `F2`) |
 
@@ -59,8 +60,9 @@ For the local-JSON source, see `references/input-sources.md` for the full field-
 
 These are mandatory. They are cheap, and they prevent the two most expensive mistakes: re-flagging known findings and re-learning known anti-patterns.
 
-1. **Manager-hub dedupe** (applies only to GitHub PR / manager-hub CUID sources). Call `mcp__code-review__mh_list_open_prs` to find the PR's CUID, then `mcp__code-lesson__get_open_comments(pullRequestId)` to fetch findings already flagged by previous review passes. Do not re-fix what is already escalated upstream. **Skip this step entirely when the input source is a local `code-review-result.json`** — the JSON is itself the canonical, already-deduped finding set. Record "manager-hub open comments: N/A (input source: local JSON)" in the self-audit so the skip is auditable.
+1. **Manager-hub dedupe** (applies only to GitHub PR / manager-hub CUID sources). Call `mcp__code-review__mh_list_open_prs` to find the PR's CUID, then `mcp__code-lesson__get_open_comments(pullRequestId)` to fetch findings already flagged by previous review passes. Do not re-fix what is already escalated upstream. **Skip this step entirely when the input source is a local `code-review-result.json`** — the JSON is itself the canonical, already-deduped finding set. Record "prior open review findings: N/A (input source: local JSON)" in the self-audit so the skip is auditable.
 2. **Code-lessons skim.** Identify the language + frameworks actually imported in the touched files, then call `mcp__code-lesson__list_lessons_for_stack` twice — once with `severity: "high"`, once with `severity: "medium"`. Severity is an exclusive filter, so a single call silently drops the other tier. This is mandated by the project CLAUDE.md, not optional. Fetch the 3–10 most relevant ids with `mcp__code-lesson__get_lessons_by_ids`.
+3. **Development rules.** After detecting each touched file's language and imported frameworks, call `get_development_rules` with the project slug, language, frameworks, and target file path. Treat returned rules as binding before classifying findings or editing code, and list the applied rules in the final self-audit.
 
 See `references/pre-gates.md` for the exact tool-call patterns and the self-audit format you must include in the final report.
 
@@ -96,7 +98,7 @@ Research is not optional curiosity — it is the evidence base for the bucket de
 | Claims current behavior is wrong (off-by-one, wrong condition, missing case) | **Firebase config probe** — is the behavior config-driven? | `mcp__firebase-explorer__query_firestore` / `query_rtdb` | `references/firebase-explorer.md` |
 | Any change to UI columns, form fields, document templates, workflow states, team-specific behavior | **Firebase config probe** | `mcp__firebase-explorer__query_firestore` / `query_rtdb` | `references/firebase-explorer.md` |
 
-If the repo isn't indexed (`mcp__reposphere__list_repos` doesn't list it, or a neighborhood/graph query returns empty for a symbol known to exist) and you cannot get it registered, you cannot apply cross-file rule (b) or (c). Escalate the comment with that as the reason.
+If the repo isn't indexed (`mcp__reposphere__list_repos` doesn't list it, or a neighborhood/graph query returns empty for a symbol known to exist) and you cannot get it registered, you cannot apply cross-file rule (a) or (b). Escalate the comment with that as the reason.
 
 ## The four buckets
 
@@ -131,10 +133,10 @@ Any comment asserting current behavior is wrong: "should return X", "off-by-one"
 - **Mandatory first step**: Firebase config probe (see `references/firebase-explorer.md`). If the behavior is steered by RTDB / Firestore config, the code is not the bug — escalate with the config path.
 - **Default action after the probe**: ESCALATE.
 - **Narrow exception**: you may proceed only if all four hold:
-  - (a) the Firebase probe rules out a config-driven explanation,
-  - (b) the bug is unambiguous,
-  - (c) you can first write a test that fails on the current code and passes after the fix (see the `test-driven-development` superpowers skill),
-  - (d) your confidence is at least 0.95.
+  - the Firebase probe rules out a config-driven explanation,
+  - the bug is unambiguous,
+  - you can first write a focused test that fails on the current code and passes after the fix (see the `test-driven-development` superpowers skill); this is the only case where the paired test file may be edited without its own anchored comment,
+  - your confidence is at least 0.95.
 - **When in doubt, escalate.** A correct bug fix without escalation is good. A wrong "bug fix" applied autonomously is much worse than escalating a real one.
 
 ## Hard rules
@@ -143,9 +145,9 @@ These are invariants. If any rule cannot be respected for a given comment, that 
 
 1. **One comment, one edit unit.** Each edit is tied to exactly one comment. Never bundle fixes across comments.
 2. **Scope is the anchored hunk plus its enclosing function.** No edits outside this scope for single-file comments.
-3. **Maximum line delta per comment: +10 / −5.** If the smallest correct fix is larger, escalate.
+3. **Maximum source-code line delta per comment: +10 / −5.** A paired test added under the narrow behavioral exception may add at most 30 lines and remove none. If the smallest correct change is larger, escalate.
 4. **Never reformat, reorder imports, or change unrelated lines.** Even if it would be cleaner. Especially then.
-5. **Never touch a file with no anchored comment**, unless the cross-file rules below explicitly permit it.
+5. **Never touch a file with no anchored comment**, except the focused paired test required by the narrow behavioral exception or a cross-file edit permitted below.
 6. **All existing tests must pass after every edit.** If they break, revert and escalate.
 7. **Edit, never rewrite.** Use targeted string-replace edits. Do not regenerate whole files or whole functions.
 8. **Confidence floor: 0.9** (0.95 for behavioral). If below the floor, escalate.
@@ -155,7 +157,8 @@ These are invariants. If any rule cannot be respected for a given comment, that 
    - `FCRM-Barndoor-Infra/terraform/` or `FCRM-Barndoor-Infra/argocd/` — infrastructure and GitOps configs.
    - `FireHawk-Infra-Configs/app-engine/` — deploy targets.
    See `references/workspace-context.md` for why.
-10. **The pre-gates in Phase 0 are not optional.** A fix run that did not skim code-lessons at both `high` and `medium` severities is itself a process failure, regardless of the per-comment outcome.
+10. **The pre-gates in Phase 0 are not optional.** A fix run that did not skim code-lessons at both `high` and `medium` severities and load applicable development rules is itself a process failure, regardless of the per-comment outcome.
+11. **Do not delegate edits.** All code changes run sequentially in the primary execution; subagents may not implement or modify fixes.
 
 These rules are stricter than a careful human reviewer would apply to themselves. That is intentional — the goal is to make the skill's behavior predictable and auditable, not maximally helpful on the margins.
 
@@ -163,11 +166,12 @@ These rules are stricter than a careful human reviewer would apply to themselves
 
 A comment anchored on file A sometimes appears to require changes in file B. The default is to escalate, because **changing B affects every caller of B**, not just the one being reviewed. That is invisible scope creep at a global scale, and it is the single most dangerous failure mode for this skill.
 
-You may touch a non-anchored file only when at least one of these is true:
+You may touch a non-anchored file only when one of these is true:
 
-- **(a) The comment body explicitly names the file or function to change.** The reviewer has taken responsibility for the cross-file linkage. No tool verification required.
+- **(a) The comment body explicitly names the file or function to change.** Enumerate and inspect every caller before editing; the reviewer naming the target does not replace impact analysis. If the repo is not indexed, escalate.
 - **(b) The callee has exactly one caller in the repo, which is the anchored site itself.** **Verify with `mcp__reposphere__explore_neighborhood({entity: callee})`** (or `mcp__reposphere__graph_query` for an explicit caller query) — the inbound edges must list exactly one site, and it must be the anchored caller. If the repo isn't indexed, this rule is unavailable; escalate.
-- **(c) The change to the non-anchored file is provably additive** — adding a new optional parameter, widening a return type, adding a new overload. **Verify by enumerating every caller** with `mcp__reposphere__graph_query` (callers of the symbol) or `mcp__reposphere__explore_neighborhood`, then inspecting each.
+
+Any cross-file signature, return-type, overload, module-boundary, move, or rename change remains a `refactor` and must be escalated, even when additive.
 
 For edits in shared libraries (`fcrm-entity-manager`, `FireHawk-AuthCheck`), the single-repo neighborhood is not enough — also run `mcp__reposphere__cross_repo_search` (and `mcp__reposphere__get_review_context` on the PR diff) against every sibling repo. The libraries are published to npm, not workspace-linked, so cross-repo callers won't show up in a single-repo view. See `references/reposphere.md`.
 
@@ -181,7 +185,7 @@ Then walk this comment-specific checklist explicitly. If any item fails, revert 
 
 - [ ] **Scope respected**: the diff for this comment touches only the allowed files and stays within the anchored hunk plus the enclosing function.
 - [ ] **Line delta matches plan**: the actual added/removed line counts match the declared plan within ±1.
-- [ ] **CFG impact matches plan**: the actual control-flow change matches what was declared. A `cosmetic` edit produces zero CFG change. A `local_guard` adds at most one new branch. A `behavioral` edit must correspond to the failing test written in step (c) of the bucket exception.
+- [ ] **CFG impact matches plan**: the actual control-flow change matches what was declared. A `cosmetic` edit produces zero CFG change. A `local_guard` adds at most one new branch. A `behavioral` edit must correspond to the failing test required by the bucket exception.
 - [ ] **Tests pass**: the full existing test suite passes for the affected project. No new failures, no skipped tests, no tests commented out.
 - [ ] **Lint passes** for projects with lint configured (`npm run lint` where present).
 - [ ] **No collateral edits**: no changes to imports, formatting, comments, or unrelated lines beyond what the comment requested.
@@ -262,15 +266,16 @@ Why it's wrong: an escalation that includes a code suggestion invites the human 
 
 ## Final reporting
 
-When all comments have been processed, produce a summary in this exact structure. For local JSON input, the `manager-hub open comments` line reads `N/A (input source: local JSON)` and the `comment #<id>` IDs match `findings[].id` (e.g. `F1`).
+When all comments have been processed, produce a summary in this exact structure. For local JSON input, the `prior open review findings` line reads `N/A (input source: local JSON)` and the `comment #<id>` IDs match `findings[].id` (e.g. `F1`).
 
 ```
 PR review fix summary
 ─────────────────────
-Pre-gates:
-  - code-lessons skimmed: <lang+frameworks>@high (N lessons), <lang+frameworks>@medium (M lessons)
-  - fetched lesson ids: <ids>; applied: <ids that influenced fixes, or "none">
-  - manager-hub open comments: <count> (deduped against this run)
+Policy checks:
+  - engineering guidance reviewed: <lang+frameworks>@high (N), <lang+frameworks>@medium (M)
+  - relevant guidance applied: <developer-facing titles, or "none">
+  - team rules checked: <project/lang/framework/file scope>; applied: <developer-facing rule titles, or "none">
+  - prior open review findings: <count> (deduped against this run)
 
 Resolved: N
   - comment #<id>: <one-line fix description>
@@ -278,7 +283,7 @@ Resolved: N
 
 Escalated: M
   - comment #<id> [<bucket>]: <reason in one short sentence>
-    Research: <key finding from reposphere / firebase-explorer, if applicable>
+    Evidence: <key dependency-analysis or configuration finding, if applicable>
   - ...
 
 Verification: all tests passing  (or: N tests failing, revert applied to comment #<id>)
@@ -299,4 +304,4 @@ The right way to extend this skill is to add more checks, not more permissions.
 - `references/firebase-explorer.md` — the Firebase config probe playbook: where behavior lives (forms, team overrides, workflow states, document templates), which env to query, common patterns.
 - `references/reposphere.md` — caller/callee and cross-file evidence (`explore_neighborhood`, `graph_query`, `get_review_context`) for cross-file rules and refactor escalations, plus cross-repo impact for shared-library edits (`fcrm-entity-manager`, `FireHawk-AuthCheck`).
 - `references/workspace-context.md` — workspace topology, why specific scopes auto-escalate, Node-version variance.
-- `references/superpowers-integration.md` — concrete per-project verification commands, how `verification-before-completion`, `test-driven-development`, `systematic-debugging`, and `subagent-driven-development` map to this skill's steps.
+- `references/superpowers-integration.md` — concrete per-project verification commands and how verification, test-driven development, and systematic debugging map to this skill's steps.

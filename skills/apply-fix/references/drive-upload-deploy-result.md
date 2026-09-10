@@ -77,20 +77,17 @@ Capture the result count:
 
 ## Step 4h.iii — Slice to latest run, then upload
 
-Read the saved local file content (the post-Output-Guardian text). Before uploading, slice out earlier runs so the Drive copy only carries the latest one — the local file stays the cumulative ledger.
+Before uploading, slice out earlier runs so the Drive copy only carries the latest one — the local file stays the cumulative ledger. Do NOT re-read the full file and slice it by hand; run this deterministic one-liner (it emits the file's header block plus the last `^## Run ` block) to a scratchpad file, then upload that output:
 
-Slicing algorithm:
+```bash
+awk 'BEGIN{header=1} /^## Run /{header=0; n++; block=""} header{printf "%s\n", $0; next} {block=block $0 "\n"} END{printf "%s", block; if(n>=2) printf "\n_Earlier runs are preserved in the deploy history._\n"}' tickets/{TICKET_KEY}/deploy-result.md > {SCRATCHPAD}/{TICKET_KEY}-deploy-result-upload.md
+```
 
-1. Find all lines matching the regex `^## Run ` (markdown level-2 heading starting with "Run ").
-2. **0 matches** → the file is a single run. Upload payload IS the full file (no slicing needed).
-3. **≥1 match** → build the payload as:
-   - **Header block:** from the start of the file up to (but not including) the FIRST `## Run ` heading.
-   - **Latest run block:** from the LAST `## Run ` heading through EOF.
-   - **Trailer line** (only when slicing actually dropped earlier runs, i.e. ≥2 `## Run ` headings exist): append below the latest run block:
-     ```
-     _Earlier runs are preserved in the deploy history._
-     ```
-   The intermediate runs (Run 1 … Run N-1) are excluded from the Drive copy.
+Behavior (matches the old model-driven algorithm exactly):
+
+- **0 `## Run ` headings** → payload is the full file (single-run files upload as-is).
+- **1 heading** → header block + that run, no trailer.
+- **≥2 headings** → header block + LAST run block + the trailer line `_Earlier runs are preserved in the deploy history._` — intermediate runs (Run 1 … Run N-1) are excluded from the Drive copy.
 
 Then upload the sliced payload:
 

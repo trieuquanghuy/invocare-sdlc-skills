@@ -18,6 +18,9 @@ previous_gap_signature = null
 
 loop:
   1. Dispatch the checker subagent with the current draft.
+       — iteration 1: full rubric.
+       — iteration 2+: SCOPED re-check (see below) — verify only the rules that
+         failed last iteration, against the sections that changed.
   2. Parse the JSON result. Expect: { verdict, gaps[], iteration_hint, ... }.
   3. Print iteration_hint to the user (e.g. "Iter 1: 3 gaps remaining — applying fixes...").
   4. If verdict == PASS:
@@ -28,12 +31,29 @@ loop:
        → exit loop with final_classification = quality=FAIL.
   7. For each gap with fixable: true:
        → apply suggested_fix to the draft.
-  8. previous_gap_signature = current_gap_signature.
-  9. iteration += 1.
-  10. If iteration > 3:
+  8. MECHANICAL-FIX SHORT-CIRCUIT: if EVERY gap this iteration was
+     (fixable: true) AND (severity: warning or info) AND every suggested_fix
+     was applied verbatim (pure text substitution — no judgment, no fresh data):
+       → self-verify each fix landed (re-read the changed lines; per agents-safety
+         A3 this is the same verification the skill owes any claim), then
+       → exit loop with final_classification = CLEAR, noting in the done-summary:
+         "iter {N} gaps were mechanical; fixes self-verified, checker not re-dispatched".
+     Any blocker-severity gap, judgment-requiring fix, or partially-applied fix
+     disqualifies the short-circuit — those need a real re-check.
+  9. previous_gap_signature = current_gap_signature.
+  10. iteration += 1.
+  11. If iteration > 3:
        → exit loop with final_classification = quality=FAIL.
-  11. Otherwise → goto step 1.
+  12. Otherwise → goto step 1.
 ```
+
+### Scoped re-check (iteration 2+)
+
+A full re-dispatch re-reads the template, rules, source artifacts, and the entire draft — expensive and mostly redundant when iteration 1 already validated the rest. On iteration 2+, the dispatch prompt MUST name the scope:
+
+> Re-check ONLY these rules against this draft: {list of rules that failed last iteration}. The remaining rubric passed on the previous iteration and the only changes since are: {one-line list of applied fixes}. Do not re-verify passing rules; do not re-run spot-check queries that already matched.
+
+The checker still returns the standard JSON. If a fix plausibly ripples beyond its rule (e.g. a section was deleted — heading structure changed), include the affected structural rule (Q6/S-structure) in the scope list. This typically cuts iteration-2 cost by 60-80% while keeping the verification honest.
 
 ---
 

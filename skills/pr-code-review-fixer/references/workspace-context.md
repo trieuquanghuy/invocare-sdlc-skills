@@ -71,4 +71,4 @@ Always check `.nvmrc` / `engines` before running scripts. A test failure that tu
 - High-level architecture: project root `CLAUDE.md`.
 - Per-project conventions: each project's own `README.md`.
 - Local dev setup for `FCRM-Web`: that project's `LOCALDEV.md`.
-- Mandatory pre-implementation lesson gate: project `.claude/CLAUDE.md` — the same gate is referenced as Phase 0 of this skill.
+- Mandatory pre-implementation lesson gate: project `.claude/rules/code-lessons.md` — the same gate is referenced as Phase 0 of this skill.

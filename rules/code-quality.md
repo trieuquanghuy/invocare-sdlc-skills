@@ -11,7 +11,7 @@ This rule is the concrete, **checkable code-level layer**: the specifics a revie
 | Scope / surgical / YAGNI / matching conventions | `engineering-conduct.md` (EC2, EC3, EC8, EC11) |
 | RTDB-vs-Firestore + write safety | `firebase-safety.md` |
 | Comment style | `code-comments.md` |
-| Blast-radius investigation (find callers first) | `impact-analysis` skill + `code-search.md` |
+| Blast-radius investigation (find callers first) | `code-search.md` (reposphere `graph_query` callers / `cross_repo_search`) |
 
 **Bias: caution over speed on non-trivial code; use judgment on trivial edits.** These are standards to prevent the expensive review issues, not ceremony for a one-line change — see the Skip list.
 
@@ -105,13 +105,23 @@ A "local" edit is not local in this workspace — ~30 sibling repos and Firebase
 
 1. Find the callers/consumers first — reposphere first per `code-search.md` (`search_with_context`, `cross_repo_search`, `explore_neighborhood`).
 2. Confirm which database holds a config value before editing it (`firebase-safety.md`).
-3. State the impact in your summary. For a risky change, the `impact-analysis` skill is the structured form of this.
+3. State the impact in your summary. For a risky change, run the reposphere callers check across sibling repos and record what you found.
+
+### CQ13 — Security boundaries
+
+Security-sensitive changes must preserve the trust boundary rather than relying on upstream assumptions:
+
+- Verify authorization for every protected action; authentication alone does not prove the caller may access or mutate the target resource.
+- Use parameterized queries, or strictly validate and constrain external input before it reaches a command, query, path, template, or other execution boundary.
+- Encode output for its destination context where untrusted content can reach HTML, URLs, logs, documents, or shell-visible text.
+- Review every added or upgraded package for necessity, maintenance status, known vulnerabilities, and lockfile integrity before accepting the dependency.
+- Run a dedicated security-review pass before completion whenever a change touches authentication, authorization, data access, externally controlled input, or dependencies. Resolve or explicitly escalate every high-confidence finding.
 
 ---
 
 ## Self-review before declaring done
 
-Before claiming a code change is complete, re-read the diff against CQ1–CQ12 (this is the SDLC **S2** pre-commit gate companion to the code-lessons re-skim — see `sdlc-gates.md`). In the done-summary, **name which CQ checks you applied** to the diff (e.g. *"checked CQ1–CQ3 correctness and CQ11–CQ12 scope; CQ5 DRY n/a — no repetition introduced"*). Naming coverage lets a reviewer see what was checked, not just that you intended to. "Done" is wrong if a check was skipped silently (`engineering-conduct.md` EC12).
+Before claiming a code change is complete, re-read the diff against CQ1–CQ13 (this is the SDLC **S2** pre-commit gate companion to the code-lessons re-skim — see `sdlc-gates.md`). In the done-summary, **name which CQ checks you applied** (e.g. *"checked CQ1–CQ3 correctness, CQ11–CQ12 scope, and CQ13 security boundaries; CQ5 DRY n/a — no repetition introduced"*). Naming coverage lets a reviewer see what was checked, not just that you intended to. "Done" is wrong if a check was skipped silently (`engineering-conduct.md` EC12).
 
 ---
 

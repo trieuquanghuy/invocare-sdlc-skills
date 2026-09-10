@@ -9,6 +9,10 @@ disable-model-invocation: true
 
 Post a structured comment documenting what was actually done on a ticket. This is posted AFTER the work is done — the ticket is ready for testing.
 
+**Focus:** the comment communicates the *technical approach as implemented* — what was actually changed and how the reader verifies it. For config fixes that means: the **data before and after the change** (concrete values, not descriptions), and the **Session deploy rows at the end** (the rollback reference). Root-cause analysis stays in the RCA (link it); the full change plan stays in the spec — the comment carries only what QA/BA/the next deployer need.
+
+**Revision semantics — correct forward, without noise.** Jira comments are append-only, so a wrong earlier comment is superseded by a new one, not edited into a thread of caveats. When a previous fix turned out incomplete or wrong: post ONE new comment stating the current truth in the normal template shape (what is now changed, current before/after data, the full cumulative Session deploy list). One sentence up front may note it supersedes the earlier comment — do not re-narrate the failed attempt, quote the old comment, or stack correction-on-correction. The reader should be able to act on the latest comment alone.
+
 **Output guardian:** all output reads as written by a developer. Apply `.claude/rules/output-guardian.md` — never include tool names, session IDs, or any indication of automation.
 
 ## When to Use
@@ -97,16 +101,11 @@ RCA pages exist for **both bugs and stories/features** (e.g., investigation of e
 
 If **no RCA found anywhere and ticket is a bug**: run the `create-rca` skill first. For stories, RCA is optional — proceed without it if not found.
 
-If **RCA found**: read it. Include the RCA link in Section 1 (Before the Fix / Requirement). Use the RCA to understand what was broken — the "Not Addressed" comparison comes from what was planned vs done (Step 3).
+If **RCA found**: read it. Include the RCA link in Section 1 (Before the Fix / Requirement). Use the RCA to understand what was broken.
 
-### Step 3: Identify "Not Addressed" Items
+### Step 3: Check for Descoped Items
 
-Compare what was planned vs what was actually done:
-
-- **Bug**: diff what was planned (from ticket folder or conversation context) against what was actually done. If no plan exists, fall back to RCA findings.
-- **Story/Feature**: diff Jira acceptance criteria against what was actually done
-
-Any gap = "Not Addressed" item. For each, note WHAT wasn't done and WHY (separate concern, blocked, deferred to another ticket, etc.).
+Compare what was planned (ticket folder / RCA / acceptance criteria) vs what was actually done. If anything was deferred or descoped, add ONE line at the end of the Fix / Implementation section — `**Deferred:** {what} — {why / follow-up ticket}` — per item. There is no dedicated "Not Addressed" section; if nothing was deferred, add nothing.
 
 ### Step 4: Verify on Dev
 
@@ -159,18 +158,12 @@ The short template is a 4-line progress checkpoint with `cc:` and `Session deplo
 
 **Before the Fix / Requirement section:** Always start by stating what the correct behavior should be per the requirements. This gives readers the baseline to judge the fix against. For bugs, contrast it with the broken state. For features, reference acceptance criteria.
 
-**Expected Result section:** Brief and concrete — what the user/system will now do differently. This is NOT a repeat of the fix details. It's the outcome in user-facing terms that dev and QA can verify.
+**Impact Area section:** Always include, but only rows the investigation actually supports. Row types:
+- **Direct fix** — the thing that was actually fixed (always exactly one or more real rows)
+- **Regression risk** — features that share the same config path, form, or code area (only if evidence shows sharing; zero rows is valid)
+- **May be affected** — use sparingly, only when there's a concrete reason for the spot check; never add one just to have a third row
 
-**Verification section covers both Dev and QA.** Dev confirms the fix is deployed and config is in place. QA follows test scenarios on dev: what to do, what to expect. Include a regression check scenario.
-
-**Impact Area section:** Always include. Derive from what the investigation found (affected paths, adjacent features) and what was changed. Three row types:
-- **Direct fix** — the thing that was actually fixed
-- **Regression risk** — features that share the same config path, form, or code area
-- **May be affected** — loosely related areas worth a spot check
-
-Populate "QA: What to Check" with a specific action (e.g. "generate Death Certificate export, confirm filename"). Populate "BA: What to Know" with business workflow context (e.g. "affects all teams using the standard funeral form"). Keep each cell to one sentence.
-
-**Not Addressed section:** Only include if there are items that were deferred or descoped. Omit the section entirely if everything was done. Use the table format with both **Reason** (why not done) and **Follow-up** (what happens next — ticket, next sprint, needs BA input). Include location (e.g., Page 3) for context.
+Every row must be actionable — a QA reader should never look at a row and think "why am I checking this?". Fewer specific rows beat many vague ones. Populate "QA: What to Check" with a specific action (e.g. "generate Death Certificate export, confirm filename"). Populate "BA: What to Know" with business workflow context (e.g. "affects all teams using the standard funeral form"). Keep each cell to one sentence.
 
 **Session Deploy section (FULL only — required):** Always populate. Pull rows from `tickets/{TICKET_KEY}/session-log.md`, filtering to `action=apply` only (drop `revert` / `re-apply` rows). Render chronological — earliest apply first. Use the same row shape as the short template (canonical spec in `short-template.md`):
 
@@ -184,7 +177,7 @@ If `session-log.md` is missing or has zero apply rows, omit the section AND surf
 
 **No `cc:` line in FULL templates.** The `cc: @assignee, @reporter, BA / PM / QA` line is a SHORT-template-only construct — it tags the next deployer + role inbox for an operational checkpoint. FULL is the QA-handoff comment; its audience is covered by the Audience section above (leaders, BA, PM, QA, UAT deployer) and does not need an inline mention list. Do not add a `cc:` line when assembling FULL; do not migrate the short template's cc convention into bug-template.md or feature-template.md.
 
-**Screenshots section:** Feature template only. Now section 8 (after Session Deploy). Only include if screenshots or demo are available.
+**Screenshots section:** Feature template only. Now section 5 (after Session Deploy). Only include if screenshots or demo are available.
 
 **UAT Deployment section:** Always include. Populate it based on fix type — keep only the matching block, delete the other two:
 
@@ -211,8 +204,8 @@ For each environment-specific path, convert it to plain English in the comment:
 This comment is read by **leaders, BA, PM, QA, and the UAT deployer**. Write for all of them:
 
 - **Leaders/PM:** Want to know what changed and that it's ready for testing
-- **BA:** Want to confirm the work matches requirements. "Not Addressed" gives them context on gaps without having to ask.
-- **QA:** Want clear test scenarios to verify the work
+- **BA:** Want to confirm the work matches requirements — deviations and deferred items are stated inline in the Fix / Implementation section
+- **QA:** Use the Impact Area table — each row's "QA: What to Check" is the test action
 - **UAT deployer** (dev team member or Claude in a new session): Jumps straight to "UAT Deployment" section — needs to know fix type, ENV_SPECIFIC IDs to resolve, exact steps, and rollback path
 
 ## Comment Rules
@@ -220,14 +213,13 @@ This comment is read by **leaders, BA, PM, QA, and the UAT deployer**. Write for
 1. **Document what was done, not what should be done** — past tense, not proposals
 2. **Code blocks show actual changes** — real old/new config or code, not pseudocode
 3. **Quantify the impact** — percentages, record counts, concrete data
-4. **Verification is for QA** — write test scenarios with steps QA can follow on dev, include regression checks, state config verification date
-5. **"Not Addressed" is honest** — state what wasn't done and why. Don't hide gaps.
+4. **QA actions live in Impact Area** — each row's "QA: What to Check" is a concrete verifiable action; no separate scenario section
+5. **Deferred work is honest** — anything descoped gets a one-line `**Deferred:**` note in the Fix section. Don't hide gaps.
 6. **Deviation from RCA** (bug only) — if the actual fix differed from RCA recommendation, say so
 7. **No estimation** — the work is done
 8. **No fix options** — there's only one outcome: what was actually done
 9. **No new suggestions** — don't propose improvements or future work. This comment closes work, it doesn't open new work
-10. **Verification section confirms, not suggests** — list what QA should verify, not new features or enhancements
-11. **Never mention internal tools** — no firebase-explorer, session IDs, MCP tools, AI/Claude references, or any internal tooling. Write the comment as a developer would, not as an AI agent running tools.
+10. **Never mention internal tools** — no firebase-explorer, session IDs, MCP tools, AI/Claude references, or any internal tooling. Write the comment as a developer would, not as an AI agent running tools.
 
 ## How to Post
 
@@ -271,17 +263,14 @@ mcp__plugin_atlassian_atlassian__addCommentToJiraIssue({
 - [ ] Detected ticket type from Jira and used correct template
 - [ ] Correct requirement stated first — reader knows what "right" looks like before seeing the fix
 - [ ] No `cc:` line in the body — `cc:` is a SHORT-only construct
-- [ ] Section 7 Session Deploy populated from session-log.md (action=apply only, chronological), or section omitted with the documented warning when no apply rows exist
+- [ ] Session Deploy section populated from session-log.md (action=apply only, chronological), or section omitted with the documented warning when no apply rows exist
 - [ ] Session Deploy rows are markdown LIST bullets (NOT a table); each row ends with the required `— {DB}` target-database field (`RTDB` / `Firestore` / `RTDB+Firestore`); timestamps have NO timezone label like `(Sydney)`; `**Session deploy**` heading written verbatim
 - [ ] Code blocks show ACTUAL changes — not pseudocode or proposals
 - [ ] Numbers are real (record counts, percentages from actual data)
-- [ ] Expected Result section is brief, concrete, and testable — not a repeat of fix details
 - [ ] Impact Area section populated — Direct fix row + at least 1 regression risk row — QA and BA columns filled with specific actions, not vague descriptions
 - [ ] Dev verified changes are live before posting (queried Firestore/RTDB/code)
-- [ ] Verification section has both Dev confirmation and QA test scenarios with Steps and Expected Results
-- [ ] Includes regression check scenario
+- [ ] Any deferred/descoped item noted inline as a one-line `**Deferred:**` entry in the Fix section
 - [ ] Describes what WAS done, not what SHOULD be done
-- [ ] "Not Addressed" items have both Reason (why not done) and Follow-up (action item)
 - [ ] Searched Confluence for RCA page (`title ~ "{TICKET_KEY}"`), linked if found. If bug and no RCA: ran `create-rca` first
 - [ ] If RCA exists: deviation from RCA noted honestly (if applicable)
 - [ ] No estimation, no fix options, no new suggestions

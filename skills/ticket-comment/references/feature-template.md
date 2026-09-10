@@ -1,3 +1,5 @@
+> **Brevity rule (author instruction — never include this block in the posted comment):** this comment is read by QA/BA skimming Jira. Include a table row, bullet, or sentence only when it tells the reader something actionable — omit filler rows, don't restate the same fact across sections, and keep prose to the template's stated length. A shorter comment that says everything real beats a complete-looking one padded to fill the template.
+
 ## 1. Requirement
 
 {What BA specified — acceptance criteria, expected behavior, business rules}
@@ -8,19 +10,14 @@
 
 {Technical details — config paths, code changes, data flow, architecture decisions}
 
-{code block or table: key changes where relevant}
+{code block or table: key changes where relevant — for config changes show before → after values, e.g. `filename: foo.pdf` → `bar.pdf`}
 
 - {Bullet: what each change does — reference specific path/function/line}
 
 {If implementation deviated from requirements, add:}
 **Deviation:** {what BA specified vs what was actually built, and why}
 
-## 3. Expected Result
-
-{Brief description of what the system should now do}
-{What the user will see — concrete, testable outcomes mapped back to requirements}
-
-## 4. Impact Area
+## 3. Impact Area
 
 > **QA** — areas to regression-test beyond this feature.
 > **BA** — business workflows or pages affected by this change.
@@ -29,19 +26,6 @@
 |------|--------|-------------------|-----------------|
 | {feature / page / module — e.g. "Funeral form — Page 3"} | Direct change | {specific thing to test} | {business workflow affected} |
 | {adjacent feature that shares config or code} | Regression risk | {what to verify is unchanged} | {why BA should be aware} |
-| {unrelated area that may be affected} | May be affected | {spot check} | {low risk, but flag if unsure} |
-
-## 5. Verification
-
-**Dev:** Config confirmed in place as of {date}. {For code-only: commit {sha} deployed to dev.}
-
-**QA Test Scenarios:**
-
-| # | Scenario | Steps | Expected Result |
-|---|----------|-------|-----------------|
-| 1 | {scenario name} | {what QA should do} | {what they should see} |
-| 2 | {scenario name} | {steps} | {expected} |
-| N | {regression check} | {steps} | {no regression} |
 
 ---
 
@@ -113,13 +97,7 @@
 
 ---
 
-## 6. Not Addressed
-
-| # | Item | Reason | Follow-up |
-|---|------|--------|-----------|
-| 1 | {what wasn't done} | {why — out of scope, blocked, needs clarification} | {action — deferred to TICKET-KEY, next sprint, needs BA input, etc.} |
-
-## 7. Session Deploy
+## 4. Session Deploy
 
 **Session deploy**
 - dev: 382 — 2026-05-26 14:50 — RTDB
@@ -130,5 +108,5 @@
 >
 > **Format rules:** the canonical row-format spec lives in [short-template.md](short-template.md) (`{SESSION_ROWS}` field rules). In brief: list bullets only (NEVER a table), row shape `- {env}: {session_id} — {YYYY-MM-DD HH:MM} — {DB}`, the trailing `— {DB}` target database required, no timezone label on the timestamp, backticks around `{session_id}` optional. Keep the `**Session deploy**` heading exactly as written — it's the marker that activates the Output Guardian carve-out at `.claude/rules/output-guardian.md`.
 
-{Optional: ## 8. Screenshots
+{Optional: ## 5. Screenshots
 {images if available}}
