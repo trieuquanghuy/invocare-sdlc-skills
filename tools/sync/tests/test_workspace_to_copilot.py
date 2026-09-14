@@ -26,7 +26,11 @@ class WorkspaceToCopilotTest(unittest.TestCase):
             "---\nname: create-spec\ndescription: Create a spec\n---\n"
             "[Spec](./references/spec.md)\n"
             "[Validation](../create-validation/references/validation.md)\n"
+            "[Workflow](../ticket-status/references/workflow-template.md)\n"
+            "[Session log](../apply-fix/references/session-log-template.md)\n"
             "[Ledger](../_shared/templates/deploy-result-template.md)\n"
+            "[Contract](../_shared/contracts/checker-contract.md)\n"
+            "[DB map](../_shared/references/firebase-db-map.md)\n"
             "Apply `.claude/rules/output-guardian.md`.\n",
         )
         self._write(
@@ -42,6 +46,23 @@ class WorkspaceToCopilotTest(unittest.TestCase):
         self._write(
             ".claude/skills/create-validation/references/validation.md",
             "# Validation\n",
+        )
+        self._write(
+            ".claude/skills/ticket-status/SKILL.md",
+            "---\nname: ticket-status\ndescription: Report status\n---\n"
+            "[Template](./references/workflow-template.md)\n",
+        )
+        self._write(
+            ".claude/skills/ticket-status/references/workflow-template.md",
+            "# Workflow\n",
+        )
+        self._write(
+            ".claude/skills/apply-fix/SKILL.md",
+            "---\nname: apply-fix\ndescription: Apply a fix\n---\n# Apply\n",
+        )
+        self._write(
+            ".claude/skills/_shared/templates/session-log-template.md",
+            "# Session log\n",
         )
         self._write(
             ".claude/skills/_shared/contracts/checker-contract.md",
@@ -115,6 +136,49 @@ class WorkspaceToCopilotTest(unittest.TestCase):
         self.assertIn("./references/create-validation/validation.md", prompt)
         self.assertIn("./references/_shared/deploy-result-template.md", prompt)
         self.assertIn(".github/instructions/output-guardian.instructions.md", prompt)
+
+    def test_rewrites_sibling_directory_links_for_any_skill(self):
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prompt = (self.target / "prompts/create-spec.prompt.md").read_text()
+        for expected in (
+            "./references/ticket-status/workflow-template.md",
+            "./references/apply-fix/session-log-template.md",
+            "./references/_shared/checker-contract.md",
+            "./_shared/references/firebase-db-map.md",
+        ):
+            self.assertIn(expected, prompt)
+        self.assertNotIn("../ticket-status/", prompt)
+        self.assertNotIn("../apply-fix/", prompt)
+        self.assertNotIn("../_shared/", prompt)
+        # The apply-fix target is alias-backed out of _shared/templates.
+        self.assertTrue(
+            (self.target / "prompts/references/apply-fix/session-log-template.md").is_file()
+        )
+
+    def test_skill_owned_template_does_not_collide_with_alias(self):
+        self._write(
+            ".claude/skills/create-spec/references/validation-template.md",
+            "# Spec-owned\n",
+        )
+        self._write(
+            ".claude/skills/create-validation/references/validation-template.md",
+            "# Validation-owned\n",
+        )
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        owned = self.target / "prompts/references/create-spec/validation-template.md"
+        self.assertEqual(owned.read_text(), "# Spec-owned\n")
+
+    def test_preserves_already_correct_parent_traversal_from_references(self):
+        self._write(
+            ".claude/skills/create-spec/references/nested.md",
+            "[DB map](../../_shared/references/firebase-db-map.md)\n",
+        )
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        nested = (self.target / "prompts/references/create-spec/nested.md").read_text()
+        self.assertIn("../../_shared/references/firebase-db-map.md", nested)
 
     def test_preserves_copilot_frontmatter_and_unmapped_files(self):
         result = self._run()

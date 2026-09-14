@@ -7,6 +7,8 @@ Rules enforced:
 3. Skills in WRITE_CAPABLE_ALLOWLIST must declare `disable-model-invocation: true`.
 """
 
+from __future__ import annotations
+
 import re
 import unittest
 from pathlib import Path

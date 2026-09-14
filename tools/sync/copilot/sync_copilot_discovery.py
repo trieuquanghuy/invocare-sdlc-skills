@@ -84,10 +84,6 @@ def _add_aliases(mappings: list[Mapping], source: Path, target: Path) -> None:
         ("create-rca/references/rca-template.md", "rca-template.md"),
         ("create-spec/references/spec-template.md", "spec-template.md"),
         ("create-validation/references/validation-template.md", "validation-template.md"),
-        (
-            "create-validation/references/validation-template.md",
-            "create-spec/validation-template.md",
-        ),
         ("_shared/templates/session-log-template.md", "apply-fix/session-log-template.md"),
         ("_shared/templates/deploy-result-template.md", "apply-fix/deploy-result-template.md"),
     )

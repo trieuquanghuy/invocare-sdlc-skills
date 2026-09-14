@@ -1,5 +1,7 @@
 """Map Claude source files into generated Copilot files."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -64,14 +66,6 @@ def adapt_paths(text: str, skill: str | None = None) -> str:
         text = re.sub(pattern, replacement, text)
     if skill:
         text = text.replace(
-            "../create-validation/references/",
-            "./references/create-validation/",
-        )
-        text = text.replace(
-            "../_shared/templates/",
-            "./references/_shared/",
-        )
-        text = text.replace(
             "./code-checker-prompt.md",
             f"./{skill}-code-checker.prompt.md",
         )
@@ -80,19 +74,21 @@ def adapt_paths(text: str, skill: str | None = None) -> str:
             f"./{skill}-checker.prompt.md",
         )
         text = text.replace("./references/", f"./references/{skill}/")
-        text = text.replace(
-            f"./references/{skill}/create-validation/",
-            "./references/create-validation/",
-        )
-        text = text.replace(
-            f"./references/{skill}/_shared/",
-            "./references/_shared/",
-        )
         text = re.sub(
             r"(?<![/A-Za-z0-9_.-])references/",
             f"./references/{skill}/",
             text,
         )
+        # Sibling traversals out of the skill's own directory. The `(?<!\.\./)`
+        # guard keeps these off the `../../_shared/references/` form used from
+        # inside a references/ directory, which already resolves correctly
+        # because both layouts nest it one level deep.
+        for pattern, replacement in (
+            (r"(?<!\.\./)\.\./_shared/(?:templates|contracts)/", "./references/_shared/"),
+            (r"(?<!\.\./)\.\./_shared/references/", "./_shared/references/"),
+            (r"(?<!\.\./)\.\./([A-Za-z0-9_-]+)/references/", r"./references/\1/"),
+        ):
+            text = re.sub(pattern, replacement, text)
     return text
 
 
