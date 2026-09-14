@@ -377,6 +377,7 @@ Run those yourself. **Use the exact file list it gives you** — never `git add 
 | Findings about files you never touched | The PR was opened against the **wrong base branch**, so the diff includes other people's commits | Fix the base on the PR. Don't reject the findings one by one — they'll come back next round |
 | A tool fails instantly, with an error about invalid parameters | A dropped connection, not a bad request. The giveaway is that it failed in **under a second** — a real rejection takes a network round-trip | `/mcp`, reconnect, re-issue the **identical** call. Don't rewrite the arguments |
 | You accidentally staged a review artifact | Easy to do in a plain repo folder | `git restore --staged <file>` before committing |
+| You stop a run part-way through | The execution is cancelled on the server, and the board records a one-line reason like `user requested stop` — deliberately nothing about how far the round got | Nothing. Your fixes, the findings and the notes stay in your folder; read the terminal for the detail. Re-run `/code-review-kms {PR}` when you're ready |
 
 ---
 

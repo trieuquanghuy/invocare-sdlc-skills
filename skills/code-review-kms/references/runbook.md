@@ -23,7 +23,7 @@
 > **Two hard rules that never bend:** the driver never commits or pushes for you (`.claude/rules/git-safety.md` G11),
 > and it never prints the value of `MANAGER_HUB_TEAM_TOKEN` (`.claude/rules/secrets-safety.md`).
 
-**Version:** v1.3 · **stamped:** 2026-08-11 · (originally maintained outside git; the lineage below is reconstructed
+**Version:** v1.7 · **stamped:** 2026-09-10 · (originally maintained outside git; the lineage below is reconstructed
 from dated notes in this file, not from commits).
 
 | Evidence generation | Run it came from | What it established |
@@ -35,6 +35,11 @@ from dated notes in this file, not from commits).
 | 2026-08-11 | local loop half-run · rubric decoded from the server's scoring panel | **LOCAL CONVERGENCE LOOP** (STEP 4.6): findings are re-derived locally after each fix and the server is written to exactly once, after the push. Rubric-computed score (never judged). `local-fix-ledger.md` feed-forward. Gates renumbered 1 / 2 / 3. Observed N = 6 specialist lenses (was 5 on PR #371) — count it, never assume. |
 | 2026-08-11 | PR #422 · GEN-3426 round 1 · full run to COMPLETED | **v1.3.** The rubric section was wrong and is replaced by the server's own `rubricVersion 1` contract: `critical −2.5`, and **every `STILL_OPEN` entry is charged as carried debt at ½ weight** (the "only new findings are scored" hypothesis is DISPROVEN). Adds the **zero-iteration round** (GATE 1/2/3 collapse), corrects the empty-findings-array rule (`distill_lessons` receives carried findings, so a 0-new-finding round does NOT starve the corpus), records the carried-½-vs-fresh-full weighting that governs the "open a clean PR?" decision, adds server gaps #7–#8 (including a **live bug that stamps `STILL_OPEN` entries `RESOLVED`**), and adds a STEP 1 **base-branch precondition** — the round's 11 out-of-diff findings were traced by the PR author to the PR having been opened against the **wrong base**, not to any server or scoring defect (first misdiagnosed here as a server gap; corrected same day) |
 | 2026-08-11 | review of the above (no run) | v1.2 corrections: exit criterion scoped to **`fix now`** high/criticals (follow-up-routed ones are deferred by design and would otherwise make it unsatisfiable — the shape two PR #371 highs actually had); GATE 3 **re-uploads the diff** (STEP 3's upload predates the loop's fixes); mid-loop execution-death recovery; empty-submission case named; `withheld-findings.md` nested per iteration |
+| 2026-09-07 | procedure edit (no run) · triggered by a live run's server warning | **v1.4.** The server now PLANS the artifact split itself and says so when the planning step fails — `Artifact planning failed for this review (cli-exit-1) — every agent reviewed the full diff instead of scoped artifacts`. Adds server gap **#9** (what the warning means, what it costs, what is and is not ours to fix) and turns STEP 3.5's one-line "split `local-diff.patch` per component" into a stated procedure with a coverage invariant, backed by `.claude/scripts/split_review_artifacts.py` |
+| 2026-09-10 | procedure edit (no run) · triggered by a leaked abort reason | **v1.5.** Adds **SERVER-BOUND TEXT**: the four `mh_*` fields that carry free text onto the board get the general condition only, from a closed `reason` allowlist — the local loop, its iteration count, the gates, the withhold set and the artifact split stay on the dev machine. `claudeStdout`/`claudeStderr` are omitted for the code_review node (since v1.1 there is no `claude` process to have produced them) rather than narrated into |
+| 2026-09-10 | procedure edit (no run) · server source read via cross-repo index, no host access | **v1.6.** The artifact split is the SERVER's: it plans with its own `claude -p` over the uploaded diff, pins the plan, and renders the board's *Review artifacts* panel from those rows. Adds **STEP 3.7** — take `artifactManifest` + `artifactReviewId` off the action and download `review-artifacts/<key>.patch` from the artifact-content route; on a planning failure force a re-plan (a fallback plan is deliberately unpinned) before degrading. STEP 3.5b drops to inventory-only and the local split becomes a labelled last resort. Rewrites gap #9: the previous "not ours to fix" was wrong, and the manifest was being dropped in the HEALTHY case too |
+
+| 2026-09-10 | review of v1.6 (no run) | **v1.7.** Three corrections to v1.6, all in the artifact path. The convergence loop **re-slices locally** instead of re-downloading: the server holds STEP 3's pre-fix diff until GATE 3, so a mid-loop fetch returned round-0 bytes and — on the server-plan path, where lenses read artifacts rather than the diff — made every iteration re-review the unfixed state (the route also takes `reviewId`, not the `executionId` v1.6 named, and no new execution exists mid-loop). The missing-manifest fallback takes its `reviewId` from **this review's action**, never `get_open_comments`, which only aggregates *completed* reviews — empty on a first review, and on a re-review carrying only prior rounds' ids. The splitter moves to `references/` **beside this file** so both install routes carry it, and both its invocations pass `--diff` / `--out-dir` explicitly (script and diff live in different trees under every layout). `artifact_filename()` makes re-splitting under a pinned server plan idempotent |
 
 **Known discrepancies in this revision** — verified against a live execution on 2026-08-05, not yet reconciled:
 1. **STEP 2's stated premise is stale.** It cites a "5-min sweeper"; the server's heartbeat reply returns
@@ -93,6 +98,11 @@ BASE_REF:     <PR base branch>                    # develop | main
 ```
 MANAGER_HUB_BASE: http://192.168.59.33:3001
 TOKEN_ENV_VAR:    MANAGER_HUB_TEAM_TOKEN          # reference by NAME only; NEVER print the value
+SPLITTER:         <absolute path to split_review_artifacts.py>
+                                                  # it ships BESIDE this runbook, in whichever directory you
+                                                  #   are reading this file from. Resolve it from there and
+                                                  #   pass it absolutely — never from {{CHECKOUT}}, which is
+                                                  #   a different tree under every install layout.
 ```
 
 ---
@@ -107,6 +117,11 @@ TOKEN_ENV_VAR:    MANAGER_HUB_TEAM_TOKEN          # reference by NAME only; NEVE
 >
 > **Do not call `mh_submit_result` on the code_review node until the loop has converged and I have pushed.** Everything
 > between STEP 4 and STEP 4.7 is local. That is the whole design — see STEP 4.6.
+>
+> **Anything you send the server names the general condition, never how the round was driven.** That governs every
+> `mh_*` field carrying free text — above all an `mh_abort_review` `reason`, which comes from a closed allowlist. The
+> gates, the loop, the iteration count, the withheld findings and the local paths stay on this machine and go in the
+> report to me. See **SERVER-BOUND TEXT**.
 >
 > ENV: `MANAGER_HUB_TEAM_TOKEN` is in the shell env (reference by name, NEVER print it). Manager-hub base:
 > `http://192.168.59.33:3001`.
@@ -183,13 +198,104 @@ TOKEN_ENV_VAR:    MANAGER_HUB_TEAM_TOKEN          # reference by NAME only; NEVE
 > **STEP 3.5 — WRITE THE CONTEXT BRIEF (before checkout, because the next call returns the prompt).** The reviewers cannot
 > see why the change was made — the `pr` object carries no `body`. Write `./review-artifacts/ticket-intent.md` from the
 > ticket folder `tickets/{KEY}/` **now**: `mh_report_checkout` is what makes the server assemble and hand back the review prompt,
-> and the file must already exist on disk before the path you name inside that prompt gets read. Also split
-> `local-diff.patch` into the `./review-artifacts/artifact-N.patch` paths the specialist prompts expect (server gap #2).
+> and the file must already exist on disk before the path you name inside that prompt gets read.
 > Content rules: **CONTEXT BRIEF** section below. Skip only if there is no ticket folder — and say so in
 > the report rather than silently omitting it.
 >
+> **STEP 3.5b — INVENTORY THE DIFF; DO NOT SPLIT IT YET.** The artifact split is **the server's to make**, and at this
+> point in the run you do not have it. Run the inventory only — it is cheap, and it is what lets you judge the server's
+> plan when it arrives:
+>
+> ```
+> python3 {{SPLITTER}} --diff {{CHECKOUT}}/local-diff.patch --list    # inventory: path, ±lines, bytes
+> ```
+>
+> Both paths are explicit on purpose: the script ships beside this runbook (inside the skill), while the diff is written
+> into `{{CHECKOUT}}`. Those are two different trees under every install layout, so neither path can be left to the
+> working directory. Resolve `{{SPLITTER}}` per the CONSTANTS note above.
+>
+> **Write no `artifact-N.patch` files here.** A locally-invented split does not become the review's scoping — the board
+> renders the *server's* plan rows, and a plan the server pinned names its own artifact keys. Inventing one in parallel
+> produces two different groupings of the same diff and hands the lenses the one nobody can see. See STEP 3.7.
+>
 > **STEP 3.6 — CHECKOUT.** `mh_report_checkout({executionId, localPath:<absolute {{CHECKOUT}} path>, headSha})`
 > (omit `localDiff` — uploaded already).
+>
+> **STEP 3.7 — TAKE THE SERVER'S ARTIFACT PLAN (on the action STEP 3.6 just returned, before any lens runs).**
+>
+> **Where the plan comes from.** The api server runs its OWN `claude -p --output-format text --model sonnet` over the
+> diff you uploaded at STEP 3 (`review-plan-pick-service.ts` → `executeClaudeCli`), grouping the diff into artifacts and
+> assigning each agent a subset (`agents[].artifactKeys`). It slices the diff under a byte budget, persists the plan and
+> its rows, and **pins them for the review's lifetime**. Those rows are what the board's *Review artifacts* panel
+> renders — By artifact / By agent / Graph. Nothing you compute locally reaches that panel.
+>
+> **The healthy path — the plan is handed to you, and it is easy to throw away.** When planning succeeds the action from
+> `mh_report_checkout` / `mh_poll_next_action` carries `artifactManifest` (`[{key, title, files, byteSize, truncated}]`)
+> plus `artifactReviewId`, and the rendered bash block carries one download curl per entry. **STEP 4 treats that block as
+> a prompt carrier and runs none of it — so those curls are exactly what gets silently dropped.** Lift them and run them:
+>
+> ```
+> mkdir -p review-artifacts
+> curl -sfS -m 30 -H "Authorization: Bearer $MANAGER_HUB_TEAM_TOKEN" \
+>   '<MANAGER_HUB_BASE>/api/public/code-review-mcp/artifact-content?reviewId=<artifactReviewId>&key=<key>' \
+>   -o review-artifacts/<key>.patch
+> ```
+>
+> Note the filename: **`<key>.patch`, the server's key** — not `artifact-N.patch`. Then hand each lens exactly the
+> artifacts its own manifest entry names, and record the mapping in the gate block. This is the whole of the scoping when
+> it exists; the local script stays unused.
+>
+> **If the action carries no manifest but a plan exists anyway, the artifacts are still discoverable — the route needs
+> only a `reviewId`.** Observed keys are literally `artifact-1`, `artifact-2`, … so walk them upward until the route
+> answers `404 {"error":"not_found"}`, and take the last success as N. This is worth knowing because it decouples the
+> fetch from the manifest entirely: a manifest that failed to render is no longer a reason to fall back to a local split.
+>
+> **Take that `reviewId` from THIS review's action, never from the finding board.** The action that dropped the manifest
+> still carries the run's own review identifier (`artifactReviewId` when present, otherwise the `reviewId` the code_review
+> node is submitted under — see SUBMIT payloads). Do **not** source it from `get_open_comments({pullRequestId})`: that
+> tool aggregates findings across every **completed** review on the PR, so
+> - on a **first review** there are no findings at all, and the fallback dead-ends on the round most likely to need it;
+> - on a **re-review** the only ids present belong to *earlier, completed* rounds — the in-flight review is by definition
+>   not among them — so the walk downloads a previous round's slices and the lenses silently review superseded code.
+>
+> That failure is invisible: stale artifacts parse fine and produce plausible findings against code that has since
+> changed. So **confirm the artifacts belong to this review before handing them to any lens** — the `reviewId` you fetched
+> with must equal the one this execution reports, and spot-check one downloaded slice against the diff you uploaded at
+> STEP 3. If it cannot be confirmed, treat the plan as absent and go to the failed path below; a labelled local split is
+> strictly better than an unlabelled stale one.
+>
+> What the walk does NOT give you, even when the id is right, is the per-agent assignment (`agents[].artifactKeys`) —
+> without the manifest you know the artifacts but not who was meant to read which, so hand every artifact to every lens
+> and say so in the gate block.
+>
+> **The failed path — force a re-plan before you accept the degrade.** A fallback plan is deliberately **not pinned**
+> (`review-pin-artifact-plan-resolution.ts`): the plan column stays NULL precisely so the next diff-bearing build retries
+> planning, and `/diff-upload` rewrites the build input rather than pinning it. So the degrade is **recoverable from
+> here**, which is the opposite of what this runbook used to say:
+>
+> 1. Re-upload the diff (STEP 3's curl, same `executionId`).
+> 2. Re-poll for the action and re-read it for `artifactManifest`.
+> 3. Got one → healthy path above, and it is now pinned for good. Still none → repeat **once** more, then stop.
+>
+> Two attempts is the whole budget, because the retry is free but not informative beyond that: **a cause that clears was
+> transient, and a cause that reproduces every build is an api-host configuration problem** — and which of the two it is
+> IS the diagnosis. Report it either way.
+>
+> **Last resort, and label it as such.** Only after the retries fail, split locally — same two explicit paths as the
+> inventory, plus an explicit output dir:
+>
+> ```
+> python3 {{SPLITTER}} --diff {{CHECKOUT}}/local-diff.patch \
+>   --out-dir {{CHECKOUT}}/review-artifacts --auto 3
+> ```
+>
+> (or `--plan {{CHECKOUT}}/review-artifacts/artifact-plan.json` once a plan exists). State in the gate block that the
+> split was **ours, not the server's**, so nobody reads the round as scoped when it was not. The coverage invariant (the
+> script fails closed on it, exit 2) still applies: every file in at least one artifact, every artifact read by at least
+> one lens. `--auto N` is the always-safe answer — it chunks without narrowing anyone's view.
+>
+> Note the filenames this path produces: **`artifact-N.patch`**, not the server's `<key>.patch`. That difference is the
+> tell, at a glance, that the round was scoped locally.
 >
 > **STEP 4 — DRIVE NODES** in the order the server returns them (typical: send_email → Code Review →
 > send_email → Distill Lessons → End). Each node returns a verbatim bash block running `claude -p ... > <outputFile>`.
@@ -232,8 +338,9 @@ TOKEN_ENV_VAR:    MANAGER_HUB_TEAM_TOKEN          # reference by NAME only; NEVE
 > and the 10-min foreground cap that forced backgrounding-and-polling.
 >
 > **What it does NOT remove.** The heartbeat still runs (STEP 2) — the server is still in `AWAIT_RESULT` and the fan-out
-> plus the gate can outlast its window. The specialists still need the `artifact-N.patch` split from STEP 3.5 if you pass
-> those paths (gap #2); simpler now, since you may hand each subagent the diff path directly. And the pre-submit withhold
+> plus the gate can outlast its window. The specialists still need their scoped artifact files on disk — from the
+> server's plan per STEP 3.7, or the labelled local fallback — because the server names those paths and creates none of
+> them (gap #2). And the pre-submit withhold
 > gate is unchanged and still mandatory — running the lenses yourself does not make their findings verified.
 >
 > **STEP 4.5 — GATE 1 · PRE-SUBMIT WITHHOLD GATE (after the Code Review node finishes; nothing is submitted yet).**
@@ -281,6 +388,61 @@ TOKEN_ENV_VAR:    MANAGER_HUB_TEAM_TOKEN          # reference by NAME only; NEVE
 
 `codeReviewJson` is the **post-gate** object, not the raw one `claude -p` wrote — see the PRE-SUBMIT WITHHOLD GATE.
 Keep the raw file untouched on disk as evidence; filter a copy.
+
+### SERVER-BOUND TEXT — the server gets the condition, not the procedure
+
+Four call sites carry free text from this machine onto the manager-hub board and into its logs, where it is durable,
+shared, and read by people who have never seen this runbook:
+
+| Call site | Field |
+|---|---|
+| `mh_abort_review` | `reason` (≤1000 chars, logged against the execution) |
+| `mh_submit_result` | `payload.claudeStdout` (1 MB cap), `payload.claudeStderr` (256 KB cap) |
+| `mh_submit_result` | finding strings inside `codeReviewJson`, and `evidence` inside `openCommentsResolvedJson` |
+| `mh_submit_result` | `payload.resultJson` for the `send_email` and `distill_lessons` nodes |
+
+**Every one of those strings names the general condition only.** How the round was driven stays on the dev machine:
+the gates, the local loop and its iteration count, which findings were withheld, the lens roster and fan-out shape,
+the artifact split, the ledger and the context brief, the local file paths, and the runbook itself. None of it is
+actionable to a board reader, and all of it is already recorded where it belongs — the operator report in the terminal
+and `review-artifacts/`. This is the boundary `output-guardian.md` draws for Jira and Confluence, applied to the review
+board: the reader does not have your workspace, and the review record is not the place to narrate your tooling.
+
+The abort that motivated this rule:
+
+| Sent as `reason` | |
+|---|---|
+| `Aborted by dev machine: Operator requested stop. Local convergence loop ran 2 iterations and was ended before the board write; findings remain local by design.` | **Wrong.** Leaks the loop, its iteration count, and the submit-once design. A board reader can act on none of it. |
+| `user requested stop` | **Right.** The condition, and the whole of what the board can use. |
+
+**Allowed `reason` values — pick the one that is true and add nothing:**
+
+- `user requested stop`
+- `checkout failed` — clone, fetch, checkout, or a `headSha` mismatch
+- `PR base mismatch — review not applicable`
+- `review could not be completed on the dev machine`
+- `dev-machine tooling error`
+- `superseded by a new execution` — the restart after an execution death
+
+You may append at most one factual identifier a board reader can actually use: the PR label, or the name of the command
+that failed (`git fetch failed`). Never a count, a gate name, a phase of the loop, or a path on your disk. **If none of
+the allowed reasons is true, stop and ask** — do not compose a descriptive one, which is exactly how the procedure leaks.
+
+**`claudeStdout` / `claudeStderr`: omit them for the code_review node.** Since v1.1 that node runs as an in-thread
+`Agent` fan-out, so no `claude` process exists and there is no stdout or stderr to report. Do not synthesise a narrative
+into those fields — a hand-written "log" is not a log, and at 1 MB and 256 KB they are by far the widest free-text
+channel on the call. For the nodes still run as `claude -p` (send_email, distill_lessons), pass the real captured bytes
+verbatim or omit the field.
+
+**Findings and evidence describe the code, not the round.** A submitted finding carries file, line, defect, and
+suggested fix; it never mentions that it survived a gate, was re-derived at iteration N, or that other findings were
+withheld. `evidence` on `openCommentsResolvedJson` (≤200 chars, required) states what the code now does — the same
+facts-never-verdicts rule the ledger runs on — not how this round decided it.
+
+**On an abort, and on any submit error, both channels are written and the report says so.** The operator gets the full
+detail in the terminal — the verbatim error, the `executionId`, the iteration reached, what is on disk and therefore
+still recoverable — and `local-fix-ledger.md` keeps it. The server gets the allowlisted line. Stating that you did both
+is what makes the split auditable; silently sending only the general line reads the same as never having the detail.
 
 ### PRE-SUBMIT WITHHOLD GATE (run between the Code Review node and `mh_submit_result`)
 
@@ -741,7 +903,34 @@ Each iteration `i` (starting at 1):
    **Use the second form during the loop.** The whole point is to review edits that are not committed yet; the
    HEAD-based form (STEP 3's) would review the state you started from and report every fix as still broken. Switch back
    to the HEAD-based form only at STEP 4.7, after the push, so the submitted findings describe the pushed state.
-   Re-split into `./review-artifacts/artifact-N.patch` if you are passing those paths (server gap #2).
+   **Re-slice the artifacts LOCALLY — never re-download them mid-loop.** The server is still holding the diff STEP 3
+   uploaded, and nothing re-uploads until GATE 3 (that single outward write is the whole design). So the artifact-content
+   route can only ever hand back **pre-fix** slices, which is precisely the failure the paragraph above warns about: the
+   lenses would review the state you started from and report every fix as still broken. On the server-plan path the lenses
+   read artifacts rather than `local-diff.patch`, so a stale re-download makes **every** iteration re-review round-0 bytes
+   — the loop appears to run and converges on nothing.
+
+   Keep the server's *plan* (it is pinned, and it is the scoping the board renders) and re-cut its *slices* from the
+   recomputed diff. Write the pinned file membership out once, from the manifest, then re-split each iteration:
+
+   ```
+   # once, when the manifest arrives at STEP 3.7 — {"artifacts": {"<key>": [files…]}}
+   # per iteration, after recomputing local-diff.patch:
+   python3 {{SPLITTER}} --diff {{CHECKOUT}}/local-diff.patch \
+     --out-dir {{CHECKOUT}}/review-artifacts \
+     --plan {{CHECKOUT}}/review-artifacts/artifact-plan.json
+   ```
+
+   The plan stays the server's; only the bytes are re-cut. The coverage check then earns its keep: it fails closed
+   (exit 2, leaving the current artifacts and plan untouched) on a file the fix newly touched that the pinned plan does
+   not name — a real event, since a fix can add a file the server never planned for. Assign it and say so in the gate
+   block. Pinned paths use the actual filenames; the helper decodes Git's quoted-path escapes when matching the diff.
+
+   Two consequences worth stating plainly. Keyed by the server's own `artifact-N`, the re-split writes those same
+   filenames back (the script does not re-prefix a key that already carries it), so **file membership and paths match the
+   board while the bytes are local** — report that, and never present a mid-loop round as server-sliced. And on the
+   local-fallback path this is the same command with the same plan, so the two paths converge here: the only difference
+   left is whose plan the JSON holds.
 3. **Re-dispatch the lenses.** Same N specialists, same verbatim lens text, same output contract — against the
    recomputed diff. **Re-dispatch all of them, not just the ones that found something.** A fix changes the file the
    other lenses read; narrowing the fan-out to "the lens that complained" is how a fix that breaks something adjacent
@@ -811,7 +1000,8 @@ Recovery:
 1. `mh_review_status({executionId})` first — confirm it is actually dead (`FAILED`) rather than still `RUNNING`. Gotcha
    #4's lesson applies: assume nothing about server state you have not read.
 2. If dead: `mh_start_review({prId, workflowId})` for a **fresh** `executionId`. Never reuse the old one — every
-   subsequent call keys off it.
+   subsequent call keys off it. If you also `mh_abort_review` the dead one, its `reason` is `superseded by a new
+   execution` and nothing more — see **SERVER-BOUND TEXT**.
 3. Re-run STEP 2 (heartbeat with the new id), STEP 3 (diff upload — from the **current** working tree, which already
    carries the loop's fixes), and STEP 3.6 (`report_checkout`). `ticket-intent.md` already exists; leave it.
 4. Resume the loop at the iteration the ledger says you reached — not at iteration 1. The new execution returns fresh
@@ -906,7 +1096,7 @@ server's coordinator prompt already promises to propagate. So the sequencing is:
    lens, output contract, and dedup rules still go in unmodified.
 3. **Reference the path; never inline the brief.** `spec.md` is routinely 40–64 KB and `rca.md` 30–46 KB — inlining into 5
    specialist prompts costs ~500 KB and buries a ~10 KB diff. The specialists have `Read` and are given the diff /
-   `artifact-N.patch` paths.
+   scoped-artifact paths.
 4. Keep local workflow tokens out of the brief's substance (ticket keys, wave IDs, session IDs). Findings feed
    `distill_lessons`, and distilled lessons are durable org-wide state.
 5. **Verify the path is readable from the checkout before running the node** — the specialists' `Read` resolves relative
@@ -1337,6 +1527,50 @@ sees one of them repaired, delete the entry.
    Every `STILL_OPEN` entry is re-materialised as a `carried-<fingerprint>` finding attached to the new review. A round
    submitting 1 new finding reported `findingsCount: 14` and the open list showed 12. Explain this proactively — the
    author otherwise reads the carried tail as findings the review just raised against their change.
+
+---
+
+## Server-side gap observed (2026-09-07) — REVISED 2026-09-10 after reading the server source
+
+9. **The server plans the artifact split with its own Claude CLI, and says so when that CLI dies.** The returned block
+   carries one line near the top:
+
+   > Artifact planning failed for this review (cli-exit-1) — every agent reviewed the full diff instead of scoped
+   > artifacts. Expect higher token usage for this run. A re-triggered review retries planning; the api server log's
+   > [review-plan] warning near the review start has the CLI stderr detail.
+
+   **What it means, precisely.** `review-plan-pick-service.ts` builds a planning prompt over the uploaded diff and calls
+   `executeClaudeCli`, which spawns `claude -p --output-format text --model sonnet` with the prompt on stdin. A non-zero
+   exit takes the `fallback()` branch, which stamps `cli-exit-<code>` and degrades every lens to the full diff. The
+   stderr tail is attached to the server's warn log **only** — it is deliberately not exposed to us.
+
+   **`cli-exit-1` is ambiguous and the ambiguity matters.** `executeClaudeCli`'s `child.on("error")` handler also
+   resolves `exitCode: 1`, so cause `cli-exit-1` covers BOTH "claude ran and exited 1" and "the spawn itself failed"
+   (bad PATH for the api process, missing CLI credentials in its env). A missing binary surfaces as `cli-exit-127`
+   through the close handler instead — the supplemental-pick tests carry that case. So: a `cli-exit-1` that clears on a
+   retry was transient (auth blip, rate limit); one that reproduces on every build is an api-host configuration problem.
+   Distinguishing them costs one retry and is the entire diagnosis available to us without the host's log.
+
+   **What was wrong in the previous revision of this entry.** It said the degrade was "not ours to fix" and "do not go
+   looking for a local file to add". Both are wrong, for the same reason: a fallback plan is **not pinned**
+   (`review-pin-artifact-plan-resolution.ts` — the plan column is left NULL *so that* the next diff-bearing build
+   retries planning, and `/diff-upload` rewrites the build input without pinning it). The CLI failure is indeed the
+   server's, but the *degrade* is recoverable from the dev machine by forcing another build. STEP 3.7 is that procedure.
+
+   **The bigger miss, which had nothing to do with the failure at all.** When planning SUCCEEDS the server hands us the
+   plan — `artifactManifest` + `artifactReviewId` on the action, and a download curl per artifact inside the rendered
+   bash block. Since v1.1 we treat that block as a prompt carrier and run none of it, so we were dropping the manifest
+   and the downloads **in the healthy case too**, then replacing them with a locally-invented split the board cannot
+   see. The server's scoping was available on every successful round and went unused. STEP 3.7 takes it.
+
+   **The one dev-side input the planner depends on** is still the STEP 3 diff upload. Confirm it returned HTTP 200 (the
+   rendered checkout bash prints `diff uploaded (N bytes) → manager-hub OK`, and skips the upload entirely with a
+   warning when `MANAGER_HUB_TEAM_TOKEN` is unset in the shell — the MCP's own env copy does not reach your shell).
+   A skipped or failed upload leaves the planner working from the GitHub diff API fallback, or from nothing.
+
+   **What to report in the round.** Which path you ended on — server plan (pinned), server plan after N retries, or
+   local fallback split — and for a local split, that it was yours. A round that reports "3 artifacts" without saying
+   whose plan produced them is unreadable a week later.
 
 ---
 

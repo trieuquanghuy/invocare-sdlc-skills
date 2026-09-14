@@ -71,6 +71,10 @@ command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1 || {
   echo "error: python3 not found or not executable." >&2
   exit 1
 }
+python3 -c 'import yaml' >/dev/null 2>&1 || {
+  echo "error: PyYAML is required; run python3 -m pip install -r \"$SCRIPT_DIR/copilot/requirements.txt\"." >&2
+  exit 1
+}
 
 STAGING="$(mktemp -d)"
 trap 'rm -rf "$STAGING"' EXIT

@@ -25,6 +25,7 @@ tools/sync/
     sync_copilot_mapping.py       content and path translation
     sync_copilot_validation.py    symlink, frontmatter, and link validation
     sync_copilot_lib.py           classification, atomic writes, and reporting
+    requirements.txt             safe YAML parser dependency
   tests/
 ```
 
@@ -35,13 +36,42 @@ The Copilot generator supports either:
 
 The explicit form powers remote staging without touching the real workspace `.claude`.
 
+## Native skill output
+
+Copilot routes generate `skills/<name>/SKILL.md`, not `prompts/<name>.prompt.md`.
+Each skill retains all visible bundled files and subdirectories, including checker
+instructions, references, scripts, and binary assets. Shared resources stay under
+`skills/_shared/` with their original layout, excluding per-machine runtime
+`config/`. Runtime paths under `.claude/skills/_shared/config/` remain unchanged
+and never become generated ownership. Markdown uses the existing
+rule/agent path translations and maps `.claude/skills/` to `.github/skills/`;
+source-relative links do not need flattening or compatibility aliases.
+Non-Markdown files are copied unchanged. New files inherit source permissions;
+existing destination permissions are preserved.
+
+Skill metadata is parsed using a safe PyYAML loader that rejects duplicate keys.
+Required names/descriptions and boolean invocation controls are validated before
+writing. Metadata is preserved rather than regenerated, so manual-only skills
+remain manual-only. Install the dependency with:
+
+```bash
+python3 -m pip install -r tools/sync/copilot/requirements.txt
+```
+
+The remote route checks this dependency before staging any downloaded content.
+See [the migration guide](../../SYNC.md#migrating-from-generated-prompt-files) for
+moving existing workspaces away from generated prompts.
+
 ## Safety invariants
 
 - Every route is one-way and never infers or deletes destination-only files.
 - `shared-manifest.txt` is the allowlist for repository/workspace transfer.
 - Personal settings, local skills, sync state, and backups never enter the checkout.
-- Copilot generation tracks owned files in `.github/.invocare-generated-manifest`. A normal apply reports stale manifest-owned files but leaves them in place. `--prune` removes only files explicitly listed in the manifest that are no longer produced by the current source; Copilot-only files not in the manifest are never touched. `--check` fails on drift or stale manifest-owned files. `--check` and `--prune` cannot be combined.
-- Copilot generation rejects source and destination symlinks, malformed frontmatter, broken relative links, and destination collisions.
+- Remote workspace installation rejects unsafe source/destination paths, securely backs up type conflicts, validates and atomically replaces its tracking state, preserves malformed `CLAUDE.md` marker content, and recreates missing managed files.
+- Copilot generation tracks owned files in `.github/.invocare-generated-manifest`. A normal apply reports stale manifest-owned files and retains them on disk and in the manifest. `--prune` removes only files explicitly listed in the manifest that are no longer produced by the current source; Copilot-only files not in the manifest are never touched. `--check` fails on drift or stale manifest-owned files. `--check` and `--prune` cannot be combined.
+- Differing, unmanaged native skill files block generation before writes. Byte-identical native files can be adopted without rewriting them. This protects existing hand-authored Copilot entry points during migration.
+- Copilot generation rejects source and destination symlinks, malformed skill metadata, broken relative resource links, and destination collisions. Stale manifest paths and their ancestors are validated before pruning.
+- Source entry points must be named exactly `SKILL.md`. Native destination casing conflicts stop before writes, including on case-insensitive filesystems. Stale manifest aliases are reconciled without unlinking active files.
 - Generated writes use atomic replacement; `--dry-run` and `--check` write nothing.
 - Shell dispatch preserves argument boundaries and implementation exit codes.
 
@@ -65,4 +95,4 @@ done < <(find hooks scripts tools/sync -type f -name '*.sh' | sort)
 git diff --check
 ```
 
-The suites cover routing, installation, direct remote staging, local Copilot generation, safety checks, idempotency, drift reporting, pruning, cleanup, and exit propagation.
+The suites cover routing, installation, direct remote staging, native skill metadata and resource bundles, executable permissions, binary assets, local Copilot generation, safety checks, idempotency, drift reporting, prompt migration, deferred pruning, cleanup, and exit propagation.

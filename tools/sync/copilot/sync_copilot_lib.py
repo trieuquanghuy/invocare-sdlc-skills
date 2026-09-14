@@ -7,6 +7,7 @@ import stat
 from sync_copilot_discovery import discover
 from sync_copilot_mapping import Mapping, render
 from sync_copilot_validation import (
+    case_mismatch,
     validate_before_render,
     validate_destination,
     validate_rendered,
@@ -50,16 +51,31 @@ def synchronize(source: Path, github: Path, mode: str, prune: bool = False) -> R
 
     # Validate manifest paths before any writes/deletes
     if stale_paths:
-        path_errors = _validate_manifest_paths(github, stale_paths, for_prune=prune)
+        path_errors = _validate_manifest_paths(github, stale_paths)
         if path_errors:
             return Result(0, 0, 0, tuple(path_errors))
+        aliases, alias_errors = _reconcile_case_aliases(github, current_owned, stale_paths)
+        if alias_errors:
+            return Result(0, 0, 0, tuple(alias_errors))
+        prior_owned |= frozenset(aliases.values())
+        stale_paths -= frozenset(aliases)
 
     # Classify generated file changes (shared across all modes)
     created = updated = unchanged = 0
-    classified: list[tuple[Mapping, str, str]] = []
+    classified: list[tuple[Mapping, bytes, str]] = []
     for mapping in mappings:
         content = rendered[mapping.destination]
         status = _classify(mapping.destination, content)
+        relative = mapping.destination.relative_to(github)
+        if (
+            relative.parts[0] == "skills"
+            and relative.as_posix() not in prior_owned
+            and status == "updated"
+        ):
+            errors.append(
+                f"unmanaged native skill file would be overwritten: {mapping.destination}; "
+                "reconcile or move it aside before syncing"
+            )
         if status == "created":
             created += 1
         elif status == "updated":
@@ -67,6 +83,9 @@ def synchronize(source: Path, github: Path, mode: str, prune: bool = False) -> R
         else:
             unchanged += 1
         classified.append((mapping, content, status))
+
+    if errors:
+        return Result(0, 0, 0, tuple(errors))
 
     generated_changes: list[tuple[str, str]] = [
         (status, _display_path(github, mapping.destination))
@@ -117,7 +136,10 @@ def synchronize(source: Path, github: Path, mode: str, prune: bool = False) -> R
     # apply mode: write generated files first
     for mapping, content, status in classified:
         if status != "unchanged":
-            _write_atomic(github, mapping.destination, content)
+            _write_atomic(
+                github, mapping.destination, content,
+                source_mode=stat.S_IMODE(mapping.source.stat().st_mode),
+            )
 
     # Prune or collect stale changes
     stale_changes_apply: list[tuple[str, str]] = []
@@ -129,11 +151,11 @@ def synchronize(source: Path, github: Path, mode: str, prune: bool = False) -> R
             removed_count += 1
             stale_changes_apply.append(("removed", f".github/{path_str}"))
             _remove_empty_parents(stale_file.parent, github)
-        else:
+        elif not prune:
             stale_changes_apply.append(("stale", f".github/{path_str}"))
 
     # Write manifest atomically after all writes and pruning succeed
-    _write_manifest_atomic(github, current_owned)
+    _write_manifest_atomic(github, current_owned | (stale_paths if not prune else frozenset()))
 
     all_changes = generated_changes + stale_changes_apply
     stale_count = sum(1 for s, _ in stale_changes_apply if s == "stale")
@@ -186,9 +208,7 @@ def _read_manifest(github: Path) -> tuple[frozenset[str], list[str]]:
     return paths, []
 
 
-def _validate_manifest_paths(
-    github: Path, paths: frozenset[str], *, for_prune: bool
-) -> list[str]:
+def _validate_manifest_paths(github: Path, paths: frozenset[str]) -> list[str]:
     errors: list[str] = []
     for path_str in sorted(paths):
         if path_str.startswith("/"):
@@ -197,11 +217,47 @@ def _validate_manifest_paths(
         if ".." in Path(path_str).parts:
             errors.append(f"manifest contains escaping path: {path_str}")
             continue
-        if for_prune and (github / path_str).is_symlink():
-            errors.append(
-                f"manifest path is a symlink, refusing to prune: {github / path_str}"
-            )
+        errors.extend(validate_destination(github, github / path_str))
+        if (github / path_str).is_dir():
+            errors.append(f"manifest path must be a file: {github / path_str}")
     return errors
+
+
+def _reconcile_case_aliases(
+    github: Path, current: frozenset[str], stale: frozenset[str]
+) -> tuple[dict[str, str], list[str]]:
+    by_identity: dict[tuple[int, int], list[str]] = {}
+    for relative in sorted(current):
+        path = github / relative
+        if path.is_file():
+            info = path.stat()
+            by_identity.setdefault((info.st_dev, info.st_ino), []).append(relative)
+
+    aliases: dict[str, str] = {}
+    errors: list[str] = []
+    for relative in sorted(stale):
+        path = github / relative
+        if not path.is_file():
+            continue
+        info = path.stat()
+        matches = by_identity.get((info.st_dev, info.st_ino), [])
+        candidates = [
+            match for match in matches
+            if case_mismatch(github, path) or case_mismatch(github, github / match)
+        ]
+        if len(candidates) > 1:
+            errors.append(f"ambiguous case-only rename aliases multiple active files: {path}")
+        elif candidates:
+            active = candidates[0]
+            if case_mismatch(github, github / active):
+                errors.append(
+                    f"destination casing differs (case-only rename): {github / active}; "
+                    "rename through a temporary name to match the source before syncing"
+                )
+            else:
+                # An obsolete spelling is not a separate file to unlink.
+                aliases[relative] = active
+    return aliases, errors
 
 
 def _write_manifest_atomic(github: Path, paths: frozenset[str]) -> None:
@@ -258,26 +314,31 @@ def _display_path(github: Path, destination: Path) -> str:
     return f".github/{destination.relative_to(github).as_posix()}"
 
 
-def _classify(destination: Path, content: str) -> str:
+def _classify(destination: Path, content: bytes) -> str:
     if destination.is_symlink():
         return "updated"
     if not destination.exists():
         return "created"
-    return "unchanged" if destination.read_text() == content else "updated"
+    return "unchanged" if destination.read_bytes() == content else "updated"
 
 
-def _write_atomic(github: Path, destination: Path, content: str) -> None:
-    errors = validate_destination(github, destination)
+def _write_atomic(
+    github: Path, destination: Path, content: bytes, *, source_mode: int
+) -> None:
+    errors = validate_destination(
+        github, destination,
+        check_case=destination.relative_to(github).parts[0] == "skills",
+    )
     if errors:
         raise ValueError(errors[0])
     mode = (
         stat.S_IMODE(destination.stat().st_mode)
         if destination.exists()
-        else 0o644
+        else source_mode
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(
-        "w",
+        "wb",
         dir=destination.parent,
         prefix=f".{destination.name}.",
         delete=False,

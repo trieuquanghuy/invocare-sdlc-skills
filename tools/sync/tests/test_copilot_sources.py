@@ -22,7 +22,9 @@ class CopilotSourceTest(unittest.TestCase):
         (self.source / "agents/base.md").write_text(
             "---\ndescription: Base\n---\n# Base\n"
         )
-        (self.source / "skills/demo/SKILL.md").write_text("# Demo\n")
+        (self.source / "skills/demo/SKILL.md").write_text(
+            "---\nname: demo\ndescription: A demo skill\n---\n# Demo\n"
+        )
         self.target.mkdir()
 
     def tearDown(self):
@@ -37,7 +39,7 @@ class CopilotSourceTest(unittest.TestCase):
         self.assertNotIn(".DS_Store", result.stdout)
 
     def test_reports_non_text_source_path(self):
-        binary = self.source / "skills/demo/references/sample.bin"
+        binary = self.source / "skills/demo/references/sample.md"
         binary.write_bytes(b"\xff\xfe")
 
         result = self._run("--dry-run")
@@ -46,8 +48,10 @@ class CopilotSourceTest(unittest.TestCase):
         self.assertIn(f"non-text source: {binary}", result.stderr)
 
     def test_generated_files_keep_existing_permissions(self):
-        destination = self.target / "prompts/demo.prompt.md"
-        destination.parent.mkdir(parents=True)
+        first = self._run()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        destination = self.target / "skills/demo/SKILL.md"
+        self.assertTrue(destination.is_file(), first.stdout)
         destination.write_text("old\n")
         destination.chmod(0o644)
 

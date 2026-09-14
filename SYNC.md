@@ -33,12 +33,20 @@ Replace `/Users/example/Works/InvoCare` with the directory that contains your `.
 
 | Route | Required |
 |---|---|
-| `remote-to-workspace` | `curl`, `tar`, `rsync`; a checkout is optional |
+| `remote-to-workspace` | `curl`, `tar`, `rsync`, `cksum`; a checkout is optional |
 | `workspace-to-checkout` | A checkout and `rsync` |
-| `workspace-to-copilot` | A checkout containing these tools and `python3` |
-| `remote-to-copilot` | A checkout, `curl`, `tar`, `rsync`, and `python3` |
+| `workspace-to-copilot` | A checkout containing these tools, `python3`, and PyYAML |
+| `remote-to-copilot` | A checkout, `curl`, `tar`, `rsync`, `cksum`, `python3`, and PyYAML |
 
 Run `./tools/sync/sync.sh help` from the checkout to list the public commands.
+
+For either Copilot route, install the generator's dependency into the Python environment used by `python3` (activate a virtual environment first if needed):
+
+```bash
+python3 -m pip install -r tools/sync/copilot/requirements.txt
+```
+
+PyYAML safely parses skill frontmatter, including quoted and multiline descriptions. Both Copilot routes report a missing dependency before generating files; the remote route checks it before downloading.
 
 ---
 
@@ -118,7 +126,7 @@ Tags are immutable: the same ref always installs the same content. `main` is the
 
 The installer copies hook scripts to `<workspace>/.claude/hooks/` and writes a reference fragment to `<workspace>/.claude/hooks/settings.json`. **Sync never writes to your personal `<workspace>/.claude/settings.local.json`.**
 
-After installation, manually merge the `hooks` entries from `.claude/hooks/settings.json` into your `.claude/settings.local.json`. A template is installed at `.claude/settings.local.json.example`. If a sync run overwrites a hook script, restore it by reinstalling the same tag or copying from `.claude/.update-backup-<timestamp>`.
+After installation, manually merge the `hooks` entries from `.claude/hooks/settings.json` into your `.claude/settings.local.json`. A template is installed at `.claude/settings.local.json.example`. If a sync run overwrites a hook script, restore it by reinstalling the same tag or copying from `.claude/.update-backup-<timestamp>.<unique>`.
 
 ---
 
@@ -186,13 +194,41 @@ After installation, manually merge the `hooks` entries from `.claude/hooks/setti
    ./tools/sync/sync.sh workspace-to-copilot <workspace> --check
    ```
 
-**Result:** source-backed files under `<workspace>/.github` are created or updated from `<workspace>/.claude`. Files that exist only in `.github` and are not recorded in `.github/.invocare-generated-manifest` are never inferred or deleted.
+**Result:** native Copilot Agent Skills, instructions, and agents under `<workspace>/.github` are created or updated from `<workspace>/.claude`:
+
+| Claude source | Copilot target |
+|---|---|
+| `skills/<name>/SKILL.md` | `skills/<name>/SKILL.md` |
+| `skills/<name>/references/`, `scripts/`, `assets/`, and other bundled files | Same paths inside `skills/<name>/` |
+| `skills/_shared/` except runtime `config/` | `skills/_shared/`, with its original subdirectories |
+| `rules/<name>.md` | `instructions/<name>.instructions.md` |
+| `agents/<name>.md` | `agents/<name>.md` |
+
+Source paths in Markdown are adapted to `.github`, while relative bundle links remain intact. Non-Markdown resources are copied byte-for-byte, and new executable scripts retain their source permissions. Hidden files/directories and `skills/_local/` are excluded.
+
+Per-machine runtime configuration under `.claude/skills/_shared/config/` stays in that location. It is not copied or claimed as generated content, and references to it are intentionally not redirected. This preserves settings created or edited by workflow runs, including Drive upload configuration.
+
+Every skill must have a file named exactly `SKILL.md`, even on case-insensitive filesystems, with valid YAML frontmatter, a directory-matching `name` (1-64 lowercase letters, numbers, and single hyphens), and a non-empty `description` of at most 1024 characters. Existing invocation controls such as `disable-model-invocation: true` are preserved, not widened.
+
+These are [Copilot Agent Skills](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills), not `.github/prompts/*.prompt.md` files. Copilot CLI also supports `.claude/skills` directly; this route is for maintaining a separate Copilot-adapted mirror.
+
+Start Copilot CLI in `<workspace>` or add that workspace with `/add-dir`, then use `/skills reload`. Use `/skills info <name>` to confirm which copy is loaded when both Claude and GitHub skill directories are available.
+
+Copilot-only files remain untouched. If an existing native skill file differs from the generated content and is not in `.github/.invocare-generated-manifest`, generation stops before writing; reconcile or move that file aside first. Byte-identical native files can be adopted into the manifest without rewriting them.
 
 `--check` writes nothing. It exits `0` when generated files match and non-zero when drift or stale manifest-owned files exist. **`--check` and `--prune` cannot be combined.**
 
+### Migrating from generated prompt files
+
+Older versions generated `.github/prompts/<name>.prompt.md`. The generator now creates `.github/skills/<name>/SKILL.md` instead. Existing manifest-owned prompts and their resources are reported as stale, but remain on disk **and in the manifest** until explicitly pruned. Applying once does not lose the ability to prune them later.
+
+Preview the migration before applying. Reconcile any hand-authored native entry points, such as an `apply-fix` wrapper, without dropping their safeguards. Keep a backup outside the skill discovery directories before moving a conflicting file aside.
+
+After generating native skills, update any Copilot-only prompts or wrappers that still depend on legacy prompt files before using `--prune`. Sync does not rewrite those Copilot-only consumers. Until legacy owned files are pruned, `--check` continues to report them as stale.
+
 ### Pruning stale generated files
 
-A stale file is one recorded in `.github/.invocare-generated-manifest` from a previous run but no longer produced by the current source. Without `--prune`, a normal apply reports stale files but leaves them in place. With `--prune`, stale files are removed.
+A stale file is one recorded in `.github/.invocare-generated-manifest` from a previous run but no longer produced by the current source. Without `--prune`, a normal apply reports stale files but leaves them in place and retains their ownership. With `--prune`, stale files and their manifest entries are removed.
 
 Preview what would be removed:
 
@@ -235,7 +271,7 @@ Only files explicitly listed in `.github/.invocare-generated-manifest` are eligi
 
 Omit `--ref <tag>` to use `main`.
 
-**Result:** remote content is downloaded into temporary staging and used to create or update `<workspace>/.github`. Temporary staging is removed on success or failure, and `<workspace>/.claude` is untouched.
+**Result:** remote content is downloaded into temporary staging and used to create or update native skills, instructions, and agents under `<workspace>/.github`, using the same layout and validation as Scenario 3. Temporary staging is removed on success or failure, and `<workspace>/.claude` is untouched. The selected remote ref must contain valid skill metadata.
 
 ### Pruning stale generated files (remote-to-copilot)
 
@@ -271,9 +307,11 @@ Apply:
 
 - No route infers or deletes destination-only files. Only files explicitly recorded in `.github/.invocare-generated-manifest` are eligible for pruning.
 - Copilot-only files that were never recorded in the manifest are always preserved.
-- Workspace installation backs up overwritten shared files under `.claude/.update-backup-<timestamp>`. Restore from the backup or reinstall with `--ref <tag>` to recover a specific version.
+- Workspace installation backs up overwritten files and source/destination type conflicts under `.claude/.update-backup-<timestamp>.<unique>`. Restore from the backup or reinstall with `--ref <tag>` to recover a specific version.
+- Workspace installation rejects unsafe source/destination symlinks and wrong-type write targets, preserves malformed `CLAUDE.md` marker content, and atomically repairs damaged local sync tracking instead of trusting a false up-to-date result.
 - Regenerate source-backed `.github` files from local `.claude` or the same remote ref.
-- Copilot generation validates symlinks, frontmatter, relative links, and destination collisions before writing.
+- Copilot generation validates symlinks, required skill metadata, relative resource links, and destination collisions before writing. Pruning validates owned paths and their ancestors before removing files.
+- Native destination spelling must match the source. Case-only renames that need reconciliation stop before writes; obsolete manifest spellings are never pruned as separate files when they alias a current destination.
 - Writes to generated files use atomic replacement.
 
 ## Troubleshooting
@@ -282,8 +320,16 @@ Apply:
 |---|---|
 | `workspace directory not found` | Pass an existing `<workspace>` path before flags. Quote paths containing spaces. |
 | `workspace .claude not found` | Run Scenario 1 first or pass the workspace that owns the source `.claude`. |
-| `python3 not found`, `rsync not found`, or `tar not found` | Install the named prerequisite and rerun the same command. |
+| `python3 not found`, `rsync not found`, `tar not found`, or `cksum not found` | Install the named prerequisite and rerun the same command. |
+| `PyYAML is required` | Activate the intended Python environment and run `python3 -m pip install -r tools/sync/copilot/requirements.txt`. |
+| `invalid skill frontmatter`, `invalid skill name`, or invalid description | Fix the reported source `SKILL.md`; use valid YAML and the name/description constraints above. The generator never truncates metadata automatically. |
+| `unmanaged native skill file would be overwritten` | Reconcile the existing Copilot-specific content with the source, then back up and move the conflicting file outside the skill discovery directories before rerunning. |
+| `case-only rename` | Rename the reported destination file or directory through a temporary name so its on-disk spelling matches the source, then rerun. Old manifest spellings are reconciled without deleting the active file. |
 | `invalid ref` | Use a branch/tag containing only letters, numbers, dots, underscores, slashes, or hyphens. |
+| `destination symlink is not allowed` | Replace the reported installer-managed symlink with a real file or directory, then rerun. |
+| `destination must be a file` or `destination must be a directory` | Move the wrong-type path aside, then rerun; sync will not guess how to replace direct write targets. |
+| `CLAUDE.md is not readable` | Restore read permission so sync can preserve the existing user-authored content. |
+| Shared manifest validation error | Fix `shared-manifest.txt` in the selected repository ref; nested, option-like, protected, and non-canonical core entries are rejected. |
 | `drift detected` during `--check` | Preview, review the listed files, then run the same route without `--check`. |
 | `stale generated file(s) found in manifest` during `--check` | Run the same route with `--prune` to remove or without `--prune` to leave in place. |
 | `--check and --prune cannot be combined` | Use one or the other, not both. |

@@ -23,6 +23,7 @@ is the procedure.
   `git add` line and a commit message; you run them. G10: never `git add .`.
 - `.claude/rules/secrets-safety.md` — never print `MANAGER_HUB_TEAM_TOKEN`; reference it by name only.
 - `.claude/rules/output-guardian.md` — anything bound for Jira, the PR, or Confluence reads as written by a developer.
+  The review board is the same boundary: see **Hard rules** below and the runbook's SERVER-BOUND TEXT.
 - `.claude/rules/agents-safety.md` — the reviewer subagents are read-only and self-contained (A1, A2, A7).
 
 ## Prerequisites
@@ -71,6 +72,20 @@ single message so they run in parallel** (`code-review-breadth` for a cross-repo
 into `codeReviewJson`. Count the lenses the block actually carries — N varies between runs; 5 and 6 have both been
 observed. The other nodes still run their blocks as returned.
 
+**The artifact split belongs to the server — take it, don't invent it.** When its planning pass succeeds, the action
+carries an `artifactManifest` plus `artifactReviewId`, and the bash block carries a download curl per artifact. Because
+the block is a prompt carrier we run none of, those curls are the easiest thing in the whole run to drop — lift them,
+fetch `review-artifacts/<key>.patch`, and give each lens the artifacts its own manifest entry names. If planning failed
+(`Artifact planning failed … (cli-exit-1)`), force a re-plan before accepting the degrade: a fallback plan is
+deliberately left unpinned so the next diff-bearing build retries it. Split locally only as a last resort, and say so.
+Full procedure: runbook → STEP 3.7.
+
+**Download the artifacts once, then re-slice them locally each iteration.** The server keeps STEP 3's pre-fix diff until
+GATE 3, so re-fetching mid-loop hands the lenses the unfixed state and every iteration re-reviews round 0. Keep the
+server's pinned *plan* (its file membership) and re-cut the *bytes* from the recomputed working-tree diff. And when a
+manifest is missing, take the `reviewId` from **this** review's action — never from `get_open_comments`, which only
+aggregates *completed* reviews and so yields nothing on a first review and a stale earlier round's id on a re-review.
+
 **Run the development-rules gate before classifying findings**, never after (runbook → DEVELOPMENT RULES GATE). Call
 `get_development_rules` with `project` from `git remote` (bare `owner/repo` slug), the `language` + `frameworks` actually
 imported by the changed files, and `filePath`. A change that **violates** a returned team rule is a valid finding; one
@@ -98,10 +113,17 @@ instead of the findings is how a round gets gamed.
   (`review-artifacts/**`, `code-review-*`, `*-prompt.txt`, `local-diff.patch`, `manager-hub-open-comments.json`).
   In `main` mode these sit in the user's everyday repo — see checkout-modes.md § Artifact hygiene.
 - **Never print** `MANAGER_HUB_TEAM_TOKEN`.
+- **Never narrate the round to the server.** Every `mh_*` field carrying free text — an `mh_abort_review` `reason` above
+  all — gets the **general condition only**, from the closed allowlist in the runbook's SERVER-BOUND TEXT
+  (`user requested stop`, `checkout failed`, …). The gates, the local loop and its iteration count, the withheld
+  findings, the artifact split and any local path stay on this machine and go in the report to the user. Omit
+  `claudeStdout` / `claudeStderr` on the code_review node — the fan-out runs in-thread, so no such log exists to send.
 - **Never call `mh_submit_result` on the code_review node before GATE 3.** One submission per round, on pushed state.
 - **Never cite an impact reading without checking the mode** — reposphere indexes the committed tree, so in `main`
   mode (dirty working copy) its call-graph answers reflect pre-edit state; local `git diff` is the change-scope authority.
 - **Write errors are evidence, not a retry signal.** On an error, stop and surface it verbatim with the `executionId`.
+- **Never present a round as scoped when the split was yours.** Report which path produced the artifacts — the server's
+  pinned plan, its plan after N re-plan attempts, or the local fallback.
 
 ## Next step
 

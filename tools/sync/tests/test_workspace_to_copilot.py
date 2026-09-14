@@ -97,24 +97,24 @@ class WorkspaceToCopilotTest(unittest.TestCase):
         expected = [
             ".github/instructions/output-guardian.instructions.md",
             ".github/agents/reviewer.md",
-            ".github/prompts/create-spec.prompt.md",
-            ".github/prompts/create-spec-checker.prompt.md",
-            ".github/prompts/references/create-spec/spec.md",
-            ".github/prompts/create-validation.prompt.md",
-            ".github/prompts/references/create-validation/validation.md",
-            ".github/prompts/references/_shared/checker-contract.md",
-            ".github/prompts/_shared/references/firebase-db-map.md",
-            ".github/prompts/references/_shared/deploy-result-template.md",
+            ".github/skills/create-spec/SKILL.md",
+            ".github/skills/create-spec/checker-prompt.md",
+            ".github/skills/create-spec/references/spec.md",
+            ".github/skills/create-validation/SKILL.md",
+            ".github/skills/create-validation/references/validation.md",
+            ".github/skills/_shared/contracts/checker-contract.md",
+            ".github/skills/_shared/references/firebase-db-map.md",
+            ".github/skills/_shared/templates/deploy-result-template.md",
         ]
         for relative_path in expected:
             target_path = relative_path.removeprefix(".github/")
             self.assertTrue((self.target / target_path).is_file(), relative_path)
 
-        prompt = (self.target / "prompts/create-spec.prompt.md").read_text()
-        self.assertIn("./references/create-spec/spec.md", prompt)
-        self.assertIn("./references/create-validation/validation.md", prompt)
-        self.assertIn("./references/_shared/deploy-result-template.md", prompt)
-        self.assertIn(".github/instructions/output-guardian.instructions.md", prompt)
+        skill = (self.target / "skills/create-spec/SKILL.md").read_text()
+        self.assertIn("./references/spec.md", skill)
+        self.assertIn("../create-validation/references/validation.md", skill)
+        self.assertIn("../_shared/templates/deploy-result-template.md", skill)
+        self.assertIn(".github/instructions/output-guardian.instructions.md", skill)
 
     def test_preserves_copilot_frontmatter_and_unmapped_files(self):
         result = self._run()
@@ -133,7 +133,7 @@ class WorkspaceToCopilotTest(unittest.TestCase):
         self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
         self.assertIn("would create", dry_run.stdout)
         self.assertFalse(
-            (self.target / "prompts/create-spec.prompt.md").exists()
+            (self.target / "skills/create-spec/SKILL.md").exists()
         )
         check = self._run("--check")
         self.assertNotEqual(check.returncode, 0)
@@ -153,7 +153,8 @@ class WorkspaceToCopilotTest(unittest.TestCase):
         self.assertIn("0 created, 0 updated", second.stdout)
 
     def test_rejects_symlink_destination(self):
-        destination = self.target / "prompts/create-spec.prompt.md"
+        destination = self.target / "skills/create-spec/SKILL.md"
+        destination.parent.mkdir(parents=True)
         destination.parent.mkdir(parents=True, exist_ok=True)
         outside = self.workspace / "outside.md"
         outside.write_text("unchanged\n")
@@ -229,7 +230,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         paths = self._manifest_paths()
         self.assertIn("instructions/base.instructions.md", paths)
         self.assertIn("agents/base.md", paths)
-        self.assertIn("prompts/base.prompt.md", paths)
+        self.assertIn("skills/base/SKILL.md", paths)
 
     def test_manifest_paths_are_sorted(self):
         result = self._run()
@@ -249,7 +250,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         self._manifest_path().write_text(
             "agents/base.md\n"
             "instructions/base.instructions.md\n"
-            "prompts/base.prompt.md\n"
+            "skills/base/SKILL.md\n"
             "prompts/old-removed.prompt.md\n"
         )
         result = self._run("--check")
@@ -262,6 +263,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         # Create a stale file and add it to the manifest
         stale = self.target / "prompts" / "old-removed.prompt.md"
+        stale.parent.mkdir(parents=True, exist_ok=True)
         stale.write_text("# Old\n")
         manifest_paths = self._manifest_paths()
         manifest_paths.add("prompts/old-removed.prompt.md")
@@ -313,6 +315,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         # Add stale file
         stale = self.target / "prompts" / "preview-me.prompt.md"
+        stale.parent.mkdir(parents=True, exist_ok=True)
         stale.write_text("# Old\n")
         manifest_paths = self._manifest_paths()
         manifest_paths.add("prompts/preview-me.prompt.md")
@@ -371,6 +374,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         # Copilot-only file not in manifest
         copilot_only = self.target / "prompts" / "copilot-only.prompt.md"
+        copilot_only.parent.mkdir(parents=True, exist_ok=True)
         copilot_only.write_text("# Keep me\n")
         result = self._run("--prune")
         self.assertEqual(result.returncode, 0, result.stderr)

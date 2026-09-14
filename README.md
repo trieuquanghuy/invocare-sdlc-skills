@@ -70,4 +70,4 @@ Example — merging the shared hooks with a personal `sdlc-gate` hook:
 }
 ```
 
-If a sync run overwrites a hook script, restore it by running the same `remote-to-workspace` command (with `--ref <tag>` to pin the version) or by copying from the backup the installer creates under `.claude/.update-backup-<timestamp>`.
+If a sync run overwrites a hook script, restore it by running the same `remote-to-workspace` command (with `--ref <tag>` to pin the version) or by copying from the backup the installer creates under `.claude/.update-backup-<timestamp>.<unique>`.

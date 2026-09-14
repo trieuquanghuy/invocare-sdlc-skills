@@ -2,14 +2,13 @@
 
 import argparse
 from pathlib import Path
+import shlex
 import sys
-
-from sync_copilot_lib import format_changes, synchronize
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate Copilot .github files from authoritative Claude files."
+        description="Generate native Copilot skills, instructions, and agents from Claude files."
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="preview changes")
@@ -51,6 +50,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.check and args.prune:
         print("error: --check and --prune cannot be combined", file=sys.stderr)
         return 2
+    try:
+        from sync_copilot_lib import format_changes, synchronize
+    except ModuleNotFoundError as error:
+        if error.name != "yaml":
+            raise
+        requirements = Path(__file__).with_name("requirements.txt")
+        print(
+            "error: PyYAML is required; install the Copilot sync dependencies with "
+            f"python3 -m pip install -r {shlex.quote(str(requirements))}",
+            file=sys.stderr,
+        )
+        return 1
     mode = "check" if args.check else "dry-run" if args.dry_run else "apply"
     try:
         source, target = resolve_roots(args)

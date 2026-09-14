@@ -101,6 +101,49 @@ print(" ".join(args))
         self.assertIn("python3", result.stderr)
         self.assertFalse(self.installer_log.exists())
 
+    def test_checks_yaml_dependency_before_downloading_remote_content(self):
+        fake_bin = self.root / "bin"
+        fake_bin.mkdir()
+        self._write_executable(
+            fake_bin / "python3",
+            'if [ "${1:-}" = "--version" ]; then exit 0; fi\nexit 1\n',
+        )
+
+        result = self._run(env={"PATH": f"{fake_bin}:{os.environ['PATH']}"})
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PyYAML", result.stderr)
+        self.assertFalse(self.installer_log.exists())
+
+    def test_real_generator_emits_native_skills_from_remote_staging(self):
+        for path in (SYNC_DIR / "copilot").glob("*.py"):
+            shutil.copy2(path, self.fixture_sync / "copilot" / path.name)
+        self._write_executable(
+            self.fixture_sync / "remote-to-workspace.sh",
+            """
+workspace="$1"
+printf '%s/.claude' "$workspace" > "$STUB_SOURCE_LOG"
+mkdir -p "$workspace/.claude/rules" "$workspace/.claude/agents" \
+  "$workspace/.claude/skills/demo/scripts"
+printf '%s\\n' '---' 'name: demo' 'description: Remote demo skill' '---' '# Demo' \
+  > "$workspace/.claude/skills/demo/SKILL.md"
+printf '#!/bin/sh\\nexit 0\\n' > "$workspace/.claude/skills/demo/scripts/run.sh"
+chmod 755 "$workspace/.claude/skills/demo/scripts/run.sh"
+""",
+        )
+
+        result = self._run()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        skill = self.workspace / ".github/skills/demo/SKILL.md"
+        self.assertTrue(skill.is_file(), result.stdout)
+        script = skill.parent / "scripts/run.sh"
+        self.assertEqual(script.stat().st_mode & 0o777, 0o755)
+        self.assertFalse((self.workspace / ".claude").exists())
+        self.assertFalse(Path(self.source_log.read_text()).exists())
+        check = self._run("--check")
+        self.assertEqual(check.returncode, 0, check.stderr)
+
     def _run(self, *args, env=None):
         environment = os.environ.copy()
         environment["STUB_SOURCE_LOG"] = str(self.source_log)

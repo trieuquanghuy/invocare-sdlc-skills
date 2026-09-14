@@ -13,6 +13,10 @@ class Mapping:
     skill: str | None = None
 
 
+def is_markdown(path: Path) -> bool:
+    return path.suffix.lower() in {".md", ".markdown"}
+
+
 def split_frontmatter(text: str) -> tuple[str, str]:
     if not text.startswith("---\n"):
         return "", text
@@ -22,90 +26,30 @@ def split_frontmatter(text: str) -> tuple[str, str]:
     return text[: end + 5], text[end + 5 :]
 
 
-def adapt_paths(text: str, skill: str | None = None) -> str:
+def adapt_paths(text: str) -> str:
     replacements = (
         (r"\.claude/rules/([A-Za-z0-9_-]+)\.md", r".github/instructions/\1.instructions.md"),
         (r"\.claude/agents/([A-Za-z0-9_-]+)\.md", r".github/agents/\1.md"),
-        (
-            r"\.claude/skills/_shared/templates/([^` )]+)",
-            r".github/prompts/references/_shared/\1",
-        ),
-        (
-            r"\.claude/skills/_shared/contracts/([^` )]+)",
-            r".github/prompts/references/_shared/\1",
-        ),
-        (
-            r"\.claude/skills/_shared/references/([^` )]+)",
-            r".github/prompts/_shared/references/\1",
-        ),
-        (
-            r"\.claude/skills/([A-Za-z0-9_-]+)/references/([^` )]+)",
-            r".github/prompts/references/\1/\2",
-        ),
-        (
-            r"\.claude/skills/([A-Za-z0-9_-]+)/code-checker-prompt\.md",
-            r".github/prompts/\1-code-checker.prompt.md",
-        ),
-        (
-            r"\.claude/skills/([A-Za-z0-9_-]+)/checker-prompt\.md",
-            r".github/prompts/\1-checker.prompt.md",
-        ),
-        (
-            r"\.claude/skills/([A-Za-z0-9_-]+)/SKILL\.md",
-            r".github/prompts/\1.prompt.md",
-        ),
-    )
-    text = text.replace(".claude/skills/**", ".github/prompts/**")
-    text = text.replace(
-        ".claude/skills/*/checker-prompt.md",
-        ".github/prompts/*-checker.prompt.md",
+        # Per-machine runtime configuration must not become generated skill data.
+        (r"\.claude/skills/(?!_shared/config(?=[/\s`\"')\]]|$))", ".github/skills/"),
     )
     for pattern, replacement in replacements:
         text = re.sub(pattern, replacement, text)
-    if skill:
-        text = text.replace(
-            "../create-validation/references/",
-            "./references/create-validation/",
-        )
-        text = text.replace(
-            "../_shared/templates/",
-            "./references/_shared/",
-        )
-        text = text.replace(
-            "./code-checker-prompt.md",
-            f"./{skill}-code-checker.prompt.md",
-        )
-        text = text.replace(
-            "./checker-prompt.md",
-            f"./{skill}-checker.prompt.md",
-        )
-        text = text.replace("./references/", f"./references/{skill}/")
-        text = text.replace(
-            f"./references/{skill}/create-validation/",
-            "./references/create-validation/",
-        )
-        text = text.replace(
-            f"./references/{skill}/_shared/",
-            "./references/_shared/",
-        )
-        text = re.sub(
-            r"(?<![/A-Za-z0-9_.-])references/",
-            f"./references/{skill}/",
-            text,
-        )
     return text
 
 
-def render(mapping: Mapping) -> str:
+def render(mapping: Mapping) -> bytes:
+    if not is_markdown(mapping.source):
+        return mapping.source.read_bytes()
     try:
-        source_text = mapping.source.read_text()
+        source_text = mapping.source.read_text(encoding="utf-8")
     except UnicodeDecodeError as error:
         raise ValueError(f"non-text source: {mapping.source}") from error
     if mapping.kind not in {"rule", "agent"}:
-        return adapt_paths(source_text, mapping.skill)
+        return adapt_paths(source_text).encode("utf-8")
     _, source_body = split_frontmatter(source_text)
     if mapping.destination.is_file() and not mapping.destination.is_symlink():
-        frontmatter, _ = split_frontmatter(mapping.destination.read_text())
+        frontmatter, _ = split_frontmatter(mapping.destination.read_text(encoding="utf-8"))
     else:
         frontmatter = ""
     if not frontmatter and mapping.kind == "rule":
@@ -121,4 +65,4 @@ def render(mapping: Mapping) -> str:
             f"---\ndescription: {description}\n"
             "tools: ['codebase', 'search', 'fetch']\n---\n"
         )
-    return frontmatter + "\n" + adapt_paths(source_body).lstrip("\n")
+    return (frontmatter + "\n" + adapt_paths(source_body).lstrip("\n")).encode("utf-8")

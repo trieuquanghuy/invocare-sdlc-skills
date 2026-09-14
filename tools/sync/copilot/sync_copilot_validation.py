@@ -2,7 +2,23 @@ from pathlib import Path
 import os
 import re
 
-from sync_copilot_mapping import Mapping
+import yaml
+
+from sync_copilot_mapping import Mapping, is_markdown, split_frontmatter
+
+
+class _SkillLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        mapping = super().construct_mapping(node, deep=deep)
+        seen = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in seen:
+                raise yaml.constructor.ConstructorError(
+                    None, None, f"duplicate frontmatter key: {key}", key_node.start_mark
+                )
+            seen.add(key)
+        return mapping
 
 
 def validate_before_render(
@@ -13,35 +29,71 @@ def validate_before_render(
         source_symlink = _first_symlink(claude, mapping.source)
         if source_symlink:
             errors.append(f"source symlink is not allowed: {source_symlink}")
-        destination_errors = validate_destination(github, mapping.destination)
+        destination_errors = validate_destination(
+            github, mapping.destination,
+            check_case=mapping.kind in {"skill", "resource"},
+        )
         errors.extend(destination_errors)
-        if not source_symlink:
-            errors.extend(_validate_raw_frontmatter(mapping.source))
-        if not destination_errors and mapping.destination.is_file():
+        if not source_symlink and is_markdown(mapping.source):
+            errors.extend(
+                _validate_raw_frontmatter(mapping.source, skill=mapping.kind == "skill")
+            )
+        if (
+            not destination_errors
+            and mapping.destination.is_file()
+            and is_markdown(mapping.destination)
+        ):
             errors.extend(_validate_raw_frontmatter(mapping.destination))
     return errors
 
 
 def validate_rendered(
     mappings: list[Mapping],
-    rendered: dict[Path, str],
+    rendered: dict[Path, bytes],
 ) -> list[str]:
     planned = set(rendered)
     errors: list[str] = []
     for mapping in mappings:
-        text = rendered[mapping.destination]
+        if not is_markdown(mapping.destination):
+            continue
+        text = rendered[mapping.destination].decode("utf-8")
         errors.extend(_validate_frontmatter(mapping.destination, text))
+        if mapping.kind == "skill":
+            errors.extend(_validate_skill_frontmatter(mapping.destination, text))
         errors.extend(_validate_links(mapping.destination, text, planned))
     return errors
 
 
-def validate_destination(github: Path, destination: Path) -> list[str]:
+def validate_destination(
+    github: Path, destination: Path, *, check_case: bool = False
+) -> list[str]:
     try:
         relative = destination.relative_to(github)
     except ValueError:
         return [f"destination escapes .github: {destination}"]
     symlink = _first_symlink(github, github / relative)
-    return [f"symlink destination is not allowed: {symlink}"] if symlink else []
+    if symlink:
+        return [f"symlink destination is not allowed: {symlink}"]
+    if check_case:
+        mismatch = case_mismatch(github, destination)
+        if mismatch:
+            return [
+                f"destination casing differs (case-only rename): {mismatch}; "
+                "rename through a temporary name to match the source before syncing"
+            ]
+    return []
+
+
+def case_mismatch(base: Path, path: Path) -> Path | None:
+    current = base
+    for part in path.relative_to(base).parts:
+        child = current / part
+        if not child.exists():
+            return None
+        if not any(entry.name == part for entry in current.iterdir()):
+            return child
+        current = child
+    return None
 
 
 def _first_symlink(base: Path, path: Path) -> Path | None:
@@ -59,20 +111,59 @@ def _first_symlink(base: Path, path: Path) -> Path | None:
     return None
 
 
-def _validate_raw_frontmatter(path: Path) -> list[str]:
+def _validate_raw_frontmatter(path: Path, *, skill: bool = False) -> list[str]:
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         return [f"non-text source: {path}"]
     except OSError as error:
         return [f"cannot read {path}: {error}"]
-    return _validate_frontmatter(path, text)
+    errors = _validate_frontmatter(path, text)
+    if skill and not errors:
+        errors.extend(_validate_skill_frontmatter(path, text))
+    return errors
 
 
 def _validate_frontmatter(path: Path, text: str) -> list[str]:
     if text.startswith("---\n") and "\n---\n" not in text[4:]:
         return [f"unclosed frontmatter: {path}"]
     return []
+
+
+def _validate_skill_frontmatter(path: Path, text: str) -> list[str]:
+    frontmatter, _ = split_frontmatter(text)
+    if not frontmatter:
+        return [f"skill requires YAML frontmatter with name and description: {path}"]
+    try:
+        metadata = yaml.load(frontmatter[4:-4], Loader=_SkillLoader)
+    except yaml.YAMLError as error:
+        return [f"invalid skill frontmatter: {path}: {error}"]
+    if not isinstance(metadata, dict):
+        return [f"skill frontmatter must be a mapping: {path}"]
+
+    errors: list[str] = []
+    name = metadata.get("name")
+    if (
+        not isinstance(name, str)
+        or not 1 <= len(name) <= 64
+        or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name)
+        or name != path.parent.name
+    ):
+        errors.append(
+            f"invalid skill name: {path}: must match directory '{path.parent.name}' "
+            "and use 1-64 lowercase letters, numbers, and single hyphens"
+        )
+    description = metadata.get("description")
+    if (
+        not isinstance(description, str)
+        or not description.strip()
+        or len(description) > 1024
+    ):
+        errors.append(f"skill description must be a non-empty string of at most 1024 characters: {path}")
+    for field in ("disable-model-invocation", "user-invocable"):
+        if field in metadata and not isinstance(metadata[field], bool):
+            errors.append(f"skill {field} must be a boolean: {path}")
+    return errors
 
 
 def _validate_links(path: Path, text: str, planned: set[Path]) -> list[str]:
@@ -89,11 +180,11 @@ def _relative_link_targets(text: str) -> list[str]:
     for match in re.finditer(r"\]\(", text):
         target, _ = _read_balanced_destination(text, match.end())
         target = target.split("#", 1)[0].strip().strip("<>")
-        if target.startswith(("./", "../")):
+        if target.startswith(("./", "../", "references/", "scripts/", "assets/")):
             targets.append(target)
     for match in re.finditer(r"(?m)^\s*\[[^\]]+\]:\s*(<[^>]+>|\S+)", text):
         target = match.group(1).split("#", 1)[0].strip().strip("<>")
-        if target.startswith(("./", "../")):
+        if target.startswith(("./", "../", "references/", "scripts/", "assets/")):
             targets.append(target)
     return targets
 
