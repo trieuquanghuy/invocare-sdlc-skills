@@ -6,6 +6,7 @@ import stat
 
 from sync_copilot_discovery import discover
 from sync_copilot_mapping import Mapping, render
+from sync_copilot_native import validate_native_layout, validate_native_shadows
 from sync_copilot_validation import (
     case_mismatch,
     validate_before_render,
@@ -27,22 +28,40 @@ class Result:
     removed: int = 0
 
 
-def synchronize(source: Path, github: Path, mode: str, prune: bool = False) -> Result:
+def synchronize(
+    source: Path, github: Path, mode: str, prune: bool = False,
+    *, skills_mode: str = "mirror",
+) -> Result:
     source = source.absolute()
     github = github.absolute()
+    if skills_mode not in {"mirror", "native"}:
+        raise ValueError(f"unknown skills mode: {skills_mode}")
+    if skills_mode == "native":
+        validate_native_layout(source, github)
     _validate_source(source)
-    mappings = discover(source, github)
+    mappings = discover(source, github, skills_mode=skills_mode)
     errors = validate_before_render(source, github, mappings)
     if errors:
         return Result(0, 0, 0, tuple(errors))
-    rendered = {mapping.destination: render(mapping) for mapping in mappings}
+    path_mappings = {
+        f".claude/{mapping.source.relative_to(source).as_posix()}":
+        f".github/{mapping.destination.relative_to(github).as_posix()}"
+        for mapping in mappings if mapping.generated and mapping.kind in {"rule", "agent"}
+    }
+    rendered = {
+        mapping.destination: render(
+            mapping, source, skills_mode=skills_mode, path_mappings=path_mappings
+        )
+        for mapping in mappings
+    }
     errors = validate_rendered(mappings, rendered)
     if errors:
         return Result(0, 0, 0, tuple(errors))
 
     # Manifest ownership
+    generated = [mapping for mapping in mappings if mapping.generated]
     current_owned: frozenset[str] = frozenset(
-        mapping.destination.relative_to(github).as_posix() for mapping in mappings
+        mapping.destination.relative_to(github).as_posix() for mapping in generated
     )
     prior_owned, manifest_errors = _read_manifest(github)
     if manifest_errors:
@@ -60,21 +79,29 @@ def synchronize(source: Path, github: Path, mode: str, prune: bool = False) -> R
         prior_owned |= frozenset(aliases.values())
         stale_paths -= frozenset(aliases)
 
+    if skills_mode == "native":
+        names = {mapping.skill for mapping in mappings if mapping.skill is not None}
+        errors.extend(
+            validate_native_shadows(source, github, names, prior_owned, prune=prune)
+        )
+        if errors:
+            return Result(0, 0, 0, tuple(errors))
+
     # Classify generated file changes (shared across all modes)
     created = updated = unchanged = 0
     classified: list[tuple[Mapping, bytes, str]] = []
-    for mapping in mappings:
+    for mapping in generated:
         content = rendered[mapping.destination]
         status = _classify(mapping.destination, content)
         relative = mapping.destination.relative_to(github)
         if (
-            relative.parts[0] == "skills"
-            and relative.as_posix() not in prior_owned
+            relative.as_posix() not in prior_owned
             and status == "updated"
         ):
+            category = "native skill" if relative.parts[0] == "skills" else mapping.kind
             errors.append(
-                f"unmanaged native skill file would be overwritten: {mapping.destination}; "
-                "reconcile or move it aside before syncing"
+                f"unmanaged {category} file would be overwritten: {mapping.destination}; "
+                "reconcile it in the source/profile or move it aside before syncing"
             )
         if status == "created":
             created += 1
@@ -155,6 +182,7 @@ def synchronize(source: Path, github: Path, mode: str, prune: bool = False) -> R
             stale_changes_apply.append(("stale", f".github/{path_str}"))
 
     # Write manifest atomically after all writes and pruning succeed
+    github.mkdir(parents=True, exist_ok=True)
     _write_manifest_atomic(github, current_owned | (stale_paths if not prune else frozenset()))
 
     all_changes = generated_changes + stale_changes_apply

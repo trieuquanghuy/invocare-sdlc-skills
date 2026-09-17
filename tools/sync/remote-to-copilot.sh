@@ -7,28 +7,43 @@ WORKSPACE=""
 MODE=""
 REF="main"
 PRUNE=""
+SKILLS_MODE="mirror"
 
 usage() {
   cat <<'EOF'
 Usage:
-  remote-to-copilot.sh [workspace] [--dry-run|--check] [--prune] [--ref REF]
+  remote-to-copilot.sh [workspace] [--dry-run|--check|--compatibility-report]
+                      [--prune] [--skills-mode mirror] [--ref REF]
 
 Downloads the remote source into temporary staging and generates workspace
 .github content without creating or modifying workspace .claude.
+Native skill reuse is local-only: temporary remote staging cannot be reused.
+Compatibility reports are read-only JSON; download progress goes to stderr.
 EOF
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --dry-run|--check)
+    --dry-run|--check|--compatibility-report)
       [ -z "$MODE" ] || {
-        echo "error: --dry-run and --check are mutually exclusive." >&2
+        echo "error: --dry-run, --check, and --compatibility-report are mutually exclusive." >&2
         exit 2
       }
       MODE="$1"
       ;;
     --prune)
       PRUNE="--prune"
+      ;;
+    --skills-mode)
+      shift
+      [ $# -gt 0 ] || {
+        echo "error: --skills-mode needs a value." >&2
+        exit 2
+      }
+      SKILLS_MODE="$1"
+      ;;
+    --skills-mode=*)
+      SKILLS_MODE="${1#*=}"
       ;;
     --ref)
       shift
@@ -52,6 +67,23 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+case "$SKILLS_MODE" in
+  mirror) ;;
+  native)
+    echo "error: native skills cannot reuse temporary remote staging; use workspace-to-copilot with persistent .claude content." >&2
+    exit 2
+    ;;
+  *)
+    echo "error: --skills-mode must be mirror or native." >&2
+    exit 2
+    ;;
+esac
+
+if [ -n "$PRUNE" ] && { [ "$MODE" = "--check" ] || [ "$MODE" = "--compatibility-report" ]; }; then
+  echo "error: $MODE and --prune cannot be combined." >&2
+  exit 2
+fi
 
 WORKSPACE="${WORKSPACE:-$PWD}"
 if ! WORKSPACE="$(cd "$WORKSPACE" 2>/dev/null && pwd)"; then
@@ -79,9 +111,14 @@ python3 -c 'import yaml' >/dev/null 2>&1 || {
 STAGING="$(mktemp -d)"
 trap 'rm -rf "$STAGING"' EXIT
 
-"$SCRIPT_DIR/remote-to-workspace.sh" "$STAGING" --ref "$REF"
+if [ "$MODE" = "--compatibility-report" ]; then
+  "$SCRIPT_DIR/remote-to-workspace.sh" "$STAGING" --ref "$REF" >&2
+else
+  "$SCRIPT_DIR/remote-to-workspace.sh" "$STAGING" --ref "$REF"
+fi
 python3 "$SCRIPT_DIR/copilot/generate.py" \
   --source "$STAGING/.claude" \
   --target "$WORKSPACE/.github" \
+  --skills-mode "$SKILLS_MODE" \
   ${MODE:+"$MODE"} \
   ${PRUNE:+"$PRUNE"}

@@ -2,36 +2,24 @@ from pathlib import Path
 import os
 import re
 
-import yaml
-
 from sync_copilot_mapping import Mapping, is_markdown, split_frontmatter
-
-
-class _SkillLoader(yaml.SafeLoader):
-    def construct_mapping(self, node, deep=False):
-        mapping = super().construct_mapping(node, deep=deep)
-        seen = set()
-        for key_node, _ in node.value:
-            key = self.construct_object(key_node, deep=deep)
-            if key in seen:
-                raise yaml.constructor.ConstructorError(
-                    None, None, f"duplicate frontmatter key: {key}", key_node.start_mark
-                )
-            seen.add(key)
-        return mapping
+from sync_copilot_yaml import load_yaml_mapping
 
 
 def validate_before_render(
     claude: Path, github: Path, mappings: list[Mapping]
 ) -> list[str]:
-    errors: list[str] = []
+    errors = validate_destination(github, github)
     for mapping in mappings:
         source_symlink = _first_symlink(claude, mapping.source)
         if source_symlink:
             errors.append(f"source symlink is not allowed: {source_symlink}")
-        destination_errors = validate_destination(
-            github, mapping.destination,
-            check_case=mapping.kind in {"skill", "resource"},
+        destination_errors = (
+            validate_destination(
+                github, mapping.destination,
+                check_case=mapping.kind in {"skill", "resource"},
+            )
+            if mapping.generated else []
         )
         errors.extend(destination_errors)
         if not source_symlink and is_markdown(mapping.source):
@@ -39,7 +27,8 @@ def validate_before_render(
                 _validate_raw_frontmatter(mapping.source, skill=mapping.kind == "skill")
             )
         if (
-            not destination_errors
+            mapping.generated
+            and not destination_errors
             and mapping.destination.is_file()
             and is_markdown(mapping.destination)
         ):
@@ -74,6 +63,15 @@ def validate_destination(
     symlink = _first_symlink(github, github / relative)
     if symlink:
         return [f"symlink destination is not allowed: {symlink}"]
+    if github.exists() and not github.is_dir():
+        return [f"destination root is not a directory: {github}"]
+    current = github
+    for part in relative.parts[:-1]:
+        current /= part
+        if current.exists() and not current.is_dir():
+            return [f"destination parent is not a directory: {current}"]
+    if relative.parts and destination.is_dir():
+        return [f"destination must be a file: {destination}"]
     if check_case:
         mismatch = case_mismatch(github, destination)
         if mismatch:
@@ -135,11 +133,9 @@ def _validate_skill_frontmatter(path: Path, text: str) -> list[str]:
     if not frontmatter:
         return [f"skill requires YAML frontmatter with name and description: {path}"]
     try:
-        metadata = yaml.load(frontmatter[4:-4], Loader=_SkillLoader)
-    except yaml.YAMLError as error:
+        metadata = load_yaml_mapping(frontmatter[4:-4], path)
+    except ValueError as error:
         return [f"invalid skill frontmatter: {path}: {error}"]
-    if not isinstance(metadata, dict):
-        return [f"skill frontmatter must be a mapping: {path}"]
 
     errors: list[str] = []
     name = metadata.get("name")
@@ -163,6 +159,8 @@ def _validate_skill_frontmatter(path: Path, text: str) -> list[str]:
     for field in ("disable-model-invocation", "user-invocable"):
         if field in metadata and not isinstance(metadata[field], bool):
             errors.append(f"skill {field} must be a boolean: {path}")
+    if "argument-hint" in metadata and not isinstance(metadata["argument-hint"], str):
+        errors.append(f"skill argument-hint must be a string: {path}")
     return errors
 
 

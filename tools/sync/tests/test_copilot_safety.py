@@ -18,7 +18,7 @@ class CopilotSafetyTest(unittest.TestCase):
         self._write(".claude/rules/base.md", "# Base\n")
         self._write(
             ".claude/agents/base.md",
-            "---\nname: base\ndescription: Base agent\n---\n# Base\n",
+            "---\nname: base\ndescription: Base agent\ntools: [Read]\n---\n# Base\n",
         )
         self._write(
             ".claude/skills/base/SKILL.md",
@@ -64,7 +64,7 @@ class CopilotSafetyTest(unittest.TestCase):
         (conventional / ".github").mkdir()
         (conventional / ".claude/rules/base.md").write_text("# Base\n")
         (conventional / ".claude/agents/base.md").write_text(
-            "---\nname: base\ndescription: Base agent\n---\n# Base\n"
+            "---\nname: base\ndescription: Base agent\ntools: [Read]\n---\n# Base\n"
         )
         (conventional / ".claude/skills/base/SKILL.md").write_text(
             "---\nname: base\ndescription: Base prompt\n---\n# Base\n"
@@ -122,7 +122,7 @@ class CopilotSafetyTest(unittest.TestCase):
 
         self._write(
             ".claude/agents/base.md",
-            "---\nname: base\ndescription: Base agent\n---\n# Base\n",
+            "---\nname: base\ndescription: Base agent\ntools: [Read]\n---\n# Base\n",
         )
         self._write(".github/agents/base.md", "---\ndescription: Broken\n")
         destination_result = self._run()
@@ -199,7 +199,7 @@ class ManifestSafetyTest(unittest.TestCase):
         self._write(".claude/rules/base.md", "# Base\n")
         self._write(
             ".claude/agents/base.md",
-            "---\nname: base\ndescription: Base agent\n---\n# Base\n",
+            "---\nname: base\ndescription: Base agent\ntools: [Read]\n---\n# Base\n",
         )
         self._write(
             ".claude/skills/base/SKILL.md",

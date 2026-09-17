@@ -20,7 +20,7 @@ class CopilotSourceTest(unittest.TestCase):
         (self.source / "skills/demo/references").mkdir(parents=True)
         (self.source / "rules/base.md").write_text("# Base\n")
         (self.source / "agents/base.md").write_text(
-            "---\ndescription: Base\n---\n# Base\n"
+            "---\ndescription: Base\ntools: [Read]\n---\n# Base\n"
         )
         (self.source / "skills/demo/SKILL.md").write_text(
             "---\nname: demo\ndescription: A demo skill\n---\n# Demo\n"
@@ -65,6 +65,9 @@ class CopilotSourceTest(unittest.TestCase):
         destination.parent.mkdir(parents=True)
         destination.write_text(
             '---\napplyTo: "**"\ndescription: "Base"\n---\nOld\n'
+        )
+        (self.target / ".invocare-generated-manifest").write_text(
+            "instructions/base.instructions.md\n"
         )
         old_inode = destination.stat().st_ino
 

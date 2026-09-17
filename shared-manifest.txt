@@ -9,6 +9,7 @@
 # by remote-to-workspace.sh from the rules/ files (a managed block), not copied from the repo.
 rules
 agents
+copilot
 scripts
 skills
 HOW-TO-USE.md

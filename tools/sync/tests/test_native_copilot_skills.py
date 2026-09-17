@@ -59,6 +59,97 @@ class NativeCopilotSkillsTest(unittest.TestCase):
         self.assertEqual(destination.read_text(), self.skill_text)
         self.assertFalse((self.target / "prompts").exists())
 
+    def test_repository_guard_state_policy_is_generated(self):
+        result = self._run(source=ROOT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        content = (
+            self.target / "instructions/code-quality.instructions.md"
+        ).read_text()
+        guard = content.split("### CQ1 ", 1)[1].split("### CQ2 ", 1)[0]
+        for check in (
+            "RC-8",
+            "before/after",
+            "NaN",
+            "clamp",
+            "keyboard",
+            "cancellation",
+            "recovery",
+        ):
+            with self.subTest(check=check):
+                self.assertTrue(check in guard, f"CQ1 omits guard check: {check}")
+
+    def test_repository_writer_path_policy_is_generated(self):
+        result = self._run(source=ROOT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        content = (
+            self.target / "instructions/code-quality.instructions.md"
+        ).read_text()
+        writers = content.split("### CQ12 ", 1)[1].split("### CQ13 ", 1)[0]
+        for check in (
+            "stored-field invariant",
+            "writer-path coverage",
+            "create",
+            "update",
+            "imports",
+            "jobs",
+            "triggers",
+            "migrations",
+            "unverified",
+            "read-only",
+        ):
+            with self.subTest(check=check):
+                self.assertTrue(check in writers, f"CQ12 omits writer check: {check}")
+
+    def test_repository_reviewers_receive_shared_guard_and_writer_policy(self):
+        result = self._run(source=ROOT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for relative in (
+            "agents/code-review-depth.md",
+            "agents/code-review-breadth.md",
+            "agents/pr-reviewer.md",
+            "skills/code-review-kms/SKILL.md",
+            "skills/code-review-kms/references/runbook.md",
+            "skills/apply-fix/references/code-fix-flow.md",
+        ):
+            content = (self.target / relative).read_text()
+            for reference in (
+                ".github/instructions/code-quality.instructions.md",
+                "CQ1",
+                "CQ12",
+            ):
+                with self.subTest(file=relative, reference=reference):
+                    self.assertTrue(
+                        reference in content,
+                        f"{relative} omits shared policy reference: {reference}",
+                    )
+
+    def test_repository_review_handoffs_preserve_coverage_gaps(self):
+        result = self._run(source=ROOT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        handoffs = {
+            "agents/code-review-breadth.md": (
+                "unverified writer-path coverage",
+                "WARN",
+            ),
+            "skills/code-review-kms/references/runbook.md": (
+                "no breadth lens",
+                "unresolved coverage",
+                "GATE 1",
+            ),
+            "skills/apply-fix/references/code-fix-flow.md": (
+                "open_questions",
+                "unverified gaps",
+            ),
+        }
+        for relative, requirements in handoffs.items():
+            content = (self.target / relative).read_text()
+            for requirement in requirements:
+                with self.subTest(file=relative, requirement=requirement):
+                    self.assertTrue(
+                        requirement in content,
+                        f"{relative} drops coverage handoff: {requirement}",
+                    )
+
     def test_copies_complete_bundle_and_executable_resources(self):
         self._write(
             "skills/demo/SKILL.md",
@@ -102,7 +193,7 @@ class NativeCopilotSkillsTest(unittest.TestCase):
             "Find `.claude/skills/*/checker-prompt.md` and `.claude/skills/**`.\n",
         )
         self._write("rules/base.md", "# Base\n")
-        self._write("agents/base.md", "---\ndescription: Base\n---\n# Base\n")
+        self._write("agents/base.md", "---\ndescription: Base\ntools: [Read]\n---\n# Base\n")
         self._write(
             "skills/other/SKILL.md",
             "---\nname: other\ndescription: Another skill.\n---\n# Other\n",

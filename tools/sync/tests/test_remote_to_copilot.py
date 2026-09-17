@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -47,7 +48,7 @@ target = Path(args[args.index("--target") + 1])
 Path(os.environ["STUB_SOURCE_LOG"]).write_text(str(source))
 if os.environ.get("STUB_GENERATOR_EXIT"):
     raise SystemExit(int(os.environ["STUB_GENERATOR_EXIT"]))
-if "--dry-run" not in args and "--check" not in args:
+if not any(mode in args for mode in ("--dry-run", "--check", "--compatibility-report")):
     target.mkdir(parents=True, exist_ok=True)
     (target / "generated.md").write_text((source / "rules/remote.md").read_text())
 print(" ".join(args))
@@ -73,7 +74,7 @@ print(" ".join(args))
         self.assertFalse(staged_source.exists())
 
     def test_forwards_modes_and_ref_without_writing(self):
-        for mode in ("--dry-run", "--check"):
+        for mode in ("--dry-run", "--check", "--compatibility-report"):
             with self.subTest(mode=mode):
                 generated = self.workspace / ".github/generated.md"
                 generated.unlink(missing_ok=True)
@@ -114,6 +115,58 @@ print(" ".join(args))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("PyYAML", result.stderr)
         self.assertFalse(self.installer_log.exists())
+
+    def test_rejects_native_reuse_before_downloading_temporary_sources(self):
+        result = self._run("--skills-mode", "native")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("temporary", result.stderr)
+        self.assertFalse(self.installer_log.exists())
+        self.assertFalse(self.source_log.exists())
+
+    def test_accepts_explicit_mirror_mode(self):
+        result = self._run("--skills-mode", "mirror", "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--skills-mode mirror", result.stdout)
+
+    def test_invalid_mode_combinations_fail_before_downloading(self):
+        for flags in (
+            ("--compatibility-report", "--prune"),
+            ("--check", "--prune"),
+            ("--compatibility-report", "--dry-run"),
+        ):
+            with self.subTest(flags=flags):
+                result = self._run(*flags)
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse(self.installer_log.exists())
+
+    def test_real_report_is_json_and_uses_the_remote_profile_without_writing(self):
+        for path in (SYNC_DIR / "copilot").glob("*.py"):
+            shutil.copy2(path, self.fixture_sync / "copilot" / path.name)
+        self._write_executable(
+            self.fixture_sync / "remote-to-workspace.sh",
+            """
+workspace="$1"
+printf '%s/.claude' "$workspace" > "$STUB_SOURCE_LOG"
+mkdir -p "$workspace/.claude/rules" "$workspace/.claude/agents" \
+  "$workspace/.claude/skills" "$workspace/.claude/copilot/agents"
+printf '%s\\n' '---' 'description: Shared reviewer' 'tools: Read' 'model: sonnet' \
+  '---' '# Review' > "$workspace/.claude/agents/reviewer.md"
+printf '%s\\n' 'description: Remote profile' 'tools: [view]' 'model: null' \
+  > "$workspace/.claude/copilot/agents/reviewer.yaml"
+printf 'Remote download completed\\n'
+""",
+        )
+        result = self._run("--compatibility-report", "--ref", "release-with-profiles")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["agents"][0]["profile"], "copilot/agents/reviewer.yaml")
+        self.assertEqual(report["agents"][0]["tools"], ["view"])
+        self.assertEqual(report["runtime_verification"], "not_performed")
+        self.assertIn("Remote download completed", result.stderr)
+        self.assertEqual(list((self.workspace / ".github").iterdir()), [])
+        self.assertFalse((self.workspace / ".claude").exists())
+        self.assertFalse(Path(self.source_log.read_text()).exists())
 
     def test_real_generator_emits_native_skills_from_remote_staging(self):
         for path in (SYNC_DIR / "copilot").glob("*.py"):

@@ -1,0 +1,15 @@
+target: copilot-cli
+user-invocable: false
+model: null # Inherit the current Copilot session model, not a translated Claude alias.
+tools:
+  - view
+  - glob
+  - reposphere/get_symbol
+  - reposphere/graph_query
+  - reposphere/find_text
+  - reposphere/search_code
+  - code-lesson/list_taxonomy
+  - code-lesson/list_lessons_for_stack
+  - code-lesson/search_lessons
+  - code-lesson/get_lessons_by_ids
+  - code-lesson/get_development_rules

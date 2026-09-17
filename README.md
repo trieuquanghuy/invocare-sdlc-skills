@@ -4,6 +4,11 @@ Shared Claude Code and GitHub Copilot governance for the InvoCare / FireHawk wor
 
 The repository's shared payload maps to a workspace `.claude` directory. The installer maintains the shared-rule imports in the workspace-root `CLAUDE.md` without replacing personal content.
 
+Copilot deployment shares content, not an assumed identical runtime configuration.
+It uses explicit versioned agent profiles, preserves rule scopes, and keeps a central
+`.github` skill mirror by default. Optional native skill reuse and read-only compatibility
+reports are covered in [the sync guide](SYNC.md#scenario-3-generate-github-from-local-workspace-claude).
+
 ## Quick start
 
 ### Reproducible install (recommended for production and onboarding)
@@ -37,7 +42,7 @@ After installation, create untracked `.claude/settings.local.json` and `.mcp.jso
 
 ## Ownership
 
-`shared-manifest.txt` is the synchronization allowlist. Shared content includes `rules/`, `skills/`, `agents/`, `scripts/`, and `HOW-TO-USE.md`.
+`shared-manifest.txt` is the synchronization allowlist. Shared content includes `rules/`, `skills/`, `agents/`, `copilot/` (client-specific agent profiles), `scripts/`, and `HOW-TO-USE.md`. Profiles contain shared non-secret declarations, not personal client settings or credentials.
 
 These remain local and are never synchronized:
 

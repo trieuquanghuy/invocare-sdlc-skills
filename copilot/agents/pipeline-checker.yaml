@@ -1,0 +1,32 @@
+target: copilot-cli
+user-invocable: false
+model: null # Inherit the current Copilot session model, not a translated Claude alias.
+tools:
+  # A bash grant is not intrinsically read-only; the body restricts command usage.
+  - bash
+  - view
+  - grep
+  - glob
+  - firebase-explorer/query_rtdb
+  - firebase-explorer/query_firestore
+  - firebase-explorer/validate_session_rollback
+  - firebase-explorer/list_environments
+  - firebase-explorer/list_collections
+  - firebase-explorer/get_session
+  - firebase-explorer/search_elasticsearch_documents
+  - firebase-explorer/list_elasticsearch_indices
+  - atlassian/getJiraIssue
+  - atlassian/getConfluencePage
+  - atlassian/searchConfluenceUsingCql
+  - atlassian/searchJiraIssuesUsingJql
+  - reposphere/search_with_context
+  - reposphere/search_code
+  - reposphere/cross_repo_search
+  - reposphere/explore_neighborhood
+  - reposphere/graph_query
+  - code-lesson/list_taxonomy
+  - code-lesson/list_lessons_for_stack
+  - code-lesson/get_lessons_by_ids
+  - code-lesson/get_development_rules
+  - code-lesson/search_lessons
+  - code-lesson/get_open_comments

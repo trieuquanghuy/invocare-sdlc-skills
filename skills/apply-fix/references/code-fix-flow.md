@@ -29,6 +29,8 @@ For every function/class/method to be changed: run `search_with_context({query: 
 
 Note any symbol with > 5 callers OR multi-service callers — these will be flagged by the code pre-flight checker (CR6). The hardcoded threshold (5) is documented in `code-checker-prompt.md`. If your team's threshold differs, edit the rubric directly — no skill should silently use a magic number.
 
+Before editing, apply `.claude/rules/code-quality.md` CQ1 (RC-8) to changed guards and CQ12 to changed stored-field invariants. Add the relevant state-transition evidence and writer-path coverage to this summary. Discovery remains read-only; additional fixes require the existing scope and per-file approvals.
+
 ## Step 5a — Code-fix pre-flight check
 
 Before any `Edit` is applied, validate the inputs by dispatching the code-path pre-flight checker subagent.
@@ -80,7 +82,7 @@ After all changes, in this order:
 1. **Scope check:** `git diff --name-only` and `git diff --stat` — confirm only the files listed in spec.md's Code Changes section were modified (local dev overrides per `.claude/rules/local-dev-overrides.md` don't count). Surface any unexpected file.
 2. **Toolchain check — run whatever the repo provides.** Detect from `package.json` scripts (or the repo's README/CI config) and run the applicable subset: `lint`, `typecheck`/`tsc --noEmit`, and the test command scoped to the touched files — which MUST include the Step 5b.1 tests (new and updated); report their pass/fail individually. Report actual output. A failure is a blocker: fix it or surface it — never summarize the run as done with a red toolchain. If the repo genuinely has no runnable checks in this environment (e.g. iOS build needs Xcode signing), say so explicitly: `toolchain checks unavailable: <reason>` — silence is not an option.
 3. **CQ self-review:** re-read the full diff against `code-quality.md` CQ1–CQ13 and the Step 5.-1 checklist; name the checks applied in the summary.
-4. **Independent review pass (non-trivial diffs):** if the diff touches logic (not a pure rename/typo), dispatch ONE `code-review-depth` agent with the changed file(s) + diff. Fix or explicitly acknowledge every blocker/warning finding before declaring done. Skip only for trivial diffs, and say so.
+4. **Independent review pass (non-trivial diffs):** if the diff touches logic (not a pure rename/typo), dispatch ONE `code-review-depth` agent with the changed file(s) + diff and the applicable CQ1/CQ12 sections inline. Resolve relevant guard/writer `open_questions` and signals read-only as the parent; when source is unavailable, report unverified gaps in Step 7 instead of claiming complete coverage. Fix or explicitly acknowledge every blocker/warning finding before declaring done. Skip only for trivial diffs, and say so.
 5. Summarize what was modified.
 
 Do NOT create git branches or commits — leave that for the user to handle.

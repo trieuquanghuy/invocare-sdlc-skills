@@ -39,6 +39,11 @@ class RepoToClaudeTest(unittest.TestCase):
             'printf "# Base\\n" > "$destination/rules/base.md"\n'
             'printf "rules\\nagents\\nscripts\\nskills\\nHOW-TO-USE.md\\n" '
             '> "$destination/shared-manifest.txt"\n'
+            '[ -z "${INJECT_COPILOT_PROFILES:-}" ] || { '
+            'mkdir -p "$destination/copilot/agents"; '
+            'printf "model: null\\ntools: [view]\\n" '
+            '> "$destination/copilot/agents/reviewer.yaml"; '
+            'printf "copilot\\n" >> "$destination/shared-manifest.txt"; }\n'
             'printf "# Guide\\n" > "$destination/HOW-TO-USE.md"\n'
             'printf "{}\\n" > "$destination/settings.local.json.example"\n'
             'printf "{}\\n" > "$destination/.mcp.json.example"\n'
@@ -112,6 +117,19 @@ class RepoToClaudeTest(unittest.TestCase):
         self.assertFalse((workspace / ".claude").exists())
         self.assertFalse((workspace / ".mcp.json.example").exists())
         self.assertIn("would create CLAUDE.md", result.stdout)
+
+    def test_versioned_copilot_profiles_travel_with_the_remote_payload(self):
+        workspace = self.root / "profiles-workspace"
+        workspace.mkdir()
+        self.env["INJECT_COPILOT_PROFILES"] = "1"
+
+        result = self._run(workspace)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            (workspace / ".claude/copilot/agents/reviewer.yaml").read_text(),
+            "model: null\ntools: [view]\n",
+        )
 
     def test_dry_run_reports_mode_without_flag_suffix(self):
         workspace = self.root / "dry-run-mode-workspace"

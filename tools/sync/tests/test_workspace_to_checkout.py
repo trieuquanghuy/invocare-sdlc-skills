@@ -56,6 +56,24 @@ class WorkspaceToCheckoutTest(unittest.TestCase):
         self.assertEqual((copied / "README.md").read_text(), "reference guide\n")
         self.assertEqual((copied / "request.example").read_text(), "example body\n")
 
+    def test_imports_versioned_copilot_profiles_from_shared_manifest(self):
+        shutil.copy2(
+            SYNC_DIR.parents[1] / "shared-manifest.txt",
+            self.checkout / "shared-manifest.txt",
+        )
+        (self.workspace / ".claude/skills").mkdir(parents=True)
+        profile = self.workspace / ".claude/copilot/agents/reviewer.yaml"
+        profile.parent.mkdir(parents=True)
+        profile.write_text("model: null\ntools: [view]\n")
+
+        result = self._run()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            (self.checkout / "copilot/agents/reviewer.yaml").read_bytes(),
+            profile.read_bytes(),
+        )
+
     def test_reports_empty_manifest(self):
         (self.checkout / "shared-manifest.txt").write_text("# no shared files\n")
         (self.workspace / ".claude").mkdir(parents=True)

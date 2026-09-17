@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 SCRIPT = Path(__file__).resolve().parents[1] / "copilot/generate.py"
 
@@ -59,6 +61,7 @@ class WorkspaceToCopilotTest(unittest.TestCase):
             ".github/agents/reviewer.md",
             "---\ndescription: Copilot reviewer\ntools: ['search']\n---\nOld\n",
         )
+        self._write(".github/.invocare-generated-manifest", "agents/reviewer.md\n")
         self._write(".github/prompts/copilot-only.prompt.md", "# Keep me\n")
 
     def tearDown(self):
@@ -116,17 +119,66 @@ class WorkspaceToCopilotTest(unittest.TestCase):
         self.assertIn("../_shared/templates/deploy-result-template.md", skill)
         self.assertIn(".github/instructions/output-guardian.instructions.md", skill)
 
-    def test_preserves_copilot_frontmatter_and_unmapped_files(self):
+    def test_source_metadata_replaces_owned_frontmatter_and_preserves_unmapped_files(self):
         result = self._run()
         self.assertEqual(result.returncode, 0, result.stderr)
         agent = (self.target / "agents/reviewer.md").read_text()
-        self.assertIn("description: Copilot reviewer", agent)
-        self.assertIn("tools: ['search']", agent)
-        self.assertNotIn("name: reviewer", agent)
+        metadata = yaml.safe_load(agent.split("---\n")[1])
+        self.assertEqual(metadata["description"], "Source reviewer")
+        self.assertEqual(metadata["name"], "reviewer")
+        self.assertEqual(len(metadata["tools"]), 1)
+        self.assertIn(metadata["tools"][0].lower(), {"read", "view"})
+        self.assertNotIn("Copilot reviewer", agent)
         self.assertEqual(
             (self.target / "prompts/copilot-only.prompt.md").read_text(),
             "# Keep me\n",
         )
+
+    def test_unmanaged_agent_frontmatter_is_not_silently_overwritten(self):
+        (self.target / ".invocare-generated-manifest").unlink()
+        destination = self.target / "agents/reviewer.md"
+        original = destination.read_bytes()
+        for mode in ((), ("--dry-run",), ("--check",), ("--prune",)):
+            with self.subTest(mode=mode):
+                result = self._run(*mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("unmanaged agent", result.stderr)
+                self.assertEqual(destination.read_bytes(), original)
+                self.assertFalse((self.target / "skills").exists())
+                self.assertFalse((self.target / ".invocare-generated-manifest").exists())
+
+    def test_unmanaged_rule_scope_is_not_silently_overwritten(self):
+        self._write(
+            ".github/instructions/output-guardian.instructions.md",
+            "---\napplyTo: docs/**\ndescription: Local policy\n---\n# Keep\n",
+        )
+        destination = self.target / "instructions/output-guardian.instructions.md"
+        original = destination.read_bytes()
+        result = self._run()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unmanaged rule", result.stderr)
+        self.assertEqual(destination.read_bytes(), original)
+        self.assertFalse((self.target / "skills").exists())
+
+    def test_versioned_profile_is_authoritative_on_repeated_generation(self):
+        self._write(
+            ".claude/copilot/agents/reviewer.yaml",
+            "description: Explicit Copilot reviewer\ntools: [view]\nmodel: null\n",
+        )
+        first = self._run()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self._write(
+            ".github/agents/reviewer.md",
+            "---\ndescription: Target-only edit\ntools: [bash]\n---\n# Old\n",
+        )
+        second = self._run()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        agent = (self.target / "agents/reviewer.md").read_text()
+        metadata = yaml.safe_load(agent.split("---\n")[1])
+        self.assertEqual(metadata["description"], "Explicit Copilot reviewer")
+        self.assertEqual(metadata["tools"], ["view"])
+        self.assertNotIn("model", metadata)
+        self.assertNotIn("Target-only edit", agent)
 
     def test_dry_run_and_check_report_drift_without_writing(self):
         dry_run = self._run("--dry-run")
@@ -178,7 +230,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         self._write(".claude/rules/base.md", "# Base\n")
         self._write(
             ".claude/agents/base.md",
-            "---\nname: base\ndescription: Base agent\n---\n# Base\n",
+            "---\nname: base\ndescription: Base agent\ntools: [Read]\n---\n# Base\n",
         )
         self._write(
             ".claude/skills/base/SKILL.md",

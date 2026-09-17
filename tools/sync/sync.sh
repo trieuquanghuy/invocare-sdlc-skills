@@ -8,8 +8,10 @@ usage() {
 Usage:
   ./tools/sync/sync.sh remote-to-workspace [workspace] [--dry-run] [--ref REF] [--force]
   ./tools/sync/sync.sh workspace-to-checkout [workspace] [--dry-run]
-  ./tools/sync/sync.sh workspace-to-copilot [workspace] [--dry-run|--check] [--prune]
-  ./tools/sync/sync.sh remote-to-copilot [workspace] [--dry-run|--check] [--prune] [--ref REF]
+  ./tools/sync/sync.sh workspace-to-copilot [workspace] [--dry-run|--check|--compatibility-report]
+                                         [--prune] [--skills-mode mirror|native]
+  ./tools/sync/sync.sh remote-to-copilot [workspace] [--dry-run|--check|--compatibility-report]
+                                      [--prune] [--skills-mode mirror] [--ref REF]
   ./tools/sync/sync.sh help
 EOF
 }
