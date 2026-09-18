@@ -1,5 +1,7 @@
 """Fail-closed conversion of source metadata and explicit Copilot agent profiles."""
 
+from __future__ import annotations
+
 from pathlib import Path
 import re
 import stat

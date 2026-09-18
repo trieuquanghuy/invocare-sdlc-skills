@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import __future__
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,24 @@ sys.path.insert(0, str(HELPERS))
 
 def markdown(metadata):
     return "---\n" + yaml.safe_dump(metadata, sort_keys=False) + "---\n\nBody.\n"
+
+
+class CopilotAnnotationCompatibilityTest(unittest.TestCase):
+    def test_union_annotations_remain_deferred_through_the_import_chain(self):
+        for name in (
+            "generate.py", "sync_copilot_discovery.py", "sync_copilot_mapping.py",
+            "sync_copilot_metadata.py", "sync_copilot_validation.py",
+        ):
+            with self.subTest(module=name):
+                path = HELPERS / name
+                code = compile(
+                    path.read_text(encoding="utf-8"), str(path), "exec",
+                    dont_inherit=True,
+                )
+                self.assertTrue(
+                    code.co_flags & __future__.annotations.compiler_flag,
+                    f"{name} must defer union annotations for Python 3.9 imports",
+                )
 
 
 class HelperTestCase(unittest.TestCase):
