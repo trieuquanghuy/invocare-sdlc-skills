@@ -25,6 +25,8 @@ is the procedure.
 - `.claude/rules/output-guardian.md` — anything bound for Jira, the PR, or Confluence reads as written by a developer.
   The review board is the same boundary: see **Hard rules** below and the runbook's SERVER-BOUND TEXT.
 - `.claude/rules/agents-safety.md` — the reviewer subagents are read-only and self-contained (A1, A2, A7).
+- `.claude/rules/code-quality.md` — CQ1 (RC-8) for changed guards and CQ12 for changed stored-field invariants.
+  Supply the applicable shared policy to reviewer dispatches without changing their lens scope or the human gates.
 
 ## Prerequisites
 

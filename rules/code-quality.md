@@ -34,6 +34,15 @@ const name = user!.profile!.displayName;
 const name = user?.profile?.displayName ?? 'Unknown';
 ```
 
+**Changed guards: state transitions (RC-8).** When adding, removing, or changing an early return, predicate, disabled condition, or loading guard, review the reachable states, not just the boolean:
+
+- Compare the before/after allowed states at the relevant boundaries, including empty, null/undefined, zero, and `NaN` where the input permits them. State the intended behavior; do not blanket-rewrite conditions to fail closed when missing input is legitimately allowed.
+- Trace exits and recovery: success, failure, cancellation, reset, and retry must not strand the user or leave a loading flag set. Logging an error does not restore state.
+- Reconcile dependent state when asynchronous data changes. Reset, reject, or clamp as the contract requires; for example, page 7 is no longer valid after the page count drops to 2. Preserve the application's indexing and empty-state conventions.
+- Follow the same action through its display/template, mouse and keyboard entry points, handler, and write boundary. A disabled control does not protect a direct handler invocation. Check affected sibling paths, including unchanged ones, without expanding into unrelated code.
+
+Use focused regression cases that distinguish the old behavior from the intended behavior; a successful build alone does not establish these state transitions.
+
 ### CQ2 — Async correctness
 
 - `await` every promise. A floating promise (called without `await`/`.catch`) loses errors and reorders effects.
@@ -106,6 +115,15 @@ A "local" edit is not local in this workspace — ~30 sibling repos and Firebase
 1. Find the callers/consumers first — reposphere first per `code-search.md` (`search_with_context`, `cross_repo_search`, `explore_neighborhood`).
 2. Confirm which database holds a config value before editing it (`firebase-safety.md`).
 3. State the impact in your summary. For a risky change, run the reposphere callers check across sibling repos and record what you found.
+
+**Changed stored-field invariants: writer-path coverage.** When changing a stored-field invariant (format, allowed values, requiredness, or update semantics), a caller walk is not a writer inventory:
+
+- Find the field/path's create and update writers, including UI/API edits, imports, jobs, triggers, and migrations/backfills. Follow shared fields across relevant repos even when those writers do not call the changed helper; distinguish readers from writers.
+- Record each writer's repo/file and evidence that it preserves the new invariant, or that an enforced common boundary prevents it from violating the invariant. Put this coverage in the existing spec/review or blast-radius summary, not a new artifact.
+- Mark inaccessible or unsearched paths as **unverified**, not "no other writers." Do not declare the invariant enforced while relevant writers are inconsistent or unverified.
+- Discovery is read-only; it does not authorize edits outside the approved scope or database writes. Surface additional fixes through the existing approval/escalation gates.
+
+Skip the writer inventory when no stored-field invariant changes; a caption or formatting edit does not justify a cross-repo sweep.
 
 ### CQ13 — Security boundaries
 

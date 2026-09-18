@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 SCRIPT = Path(__file__).resolve().parents[1] / "copilot/generate.py"
 
@@ -27,7 +29,7 @@ class WorkspaceToCopilotTest(unittest.TestCase):
             "[Spec](./references/spec.md)\n"
             "[Validation](../create-validation/references/validation.md)\n"
             "[Workflow](../ticket-status/references/workflow-template.md)\n"
-            "[Session log](../apply-fix/references/session-log-template.md)\n"
+            "[Session log](../_shared/templates/session-log-template.md)\n"
             "[Ledger](../_shared/templates/deploy-result-template.md)\n"
             "[Contract](../_shared/contracts/checker-contract.md)\n"
             "[DB map](../_shared/references/firebase-db-map.md)\n"
@@ -80,6 +82,7 @@ class WorkspaceToCopilotTest(unittest.TestCase):
             ".github/agents/reviewer.md",
             "---\ndescription: Copilot reviewer\ntools: ['search']\n---\nOld\n",
         )
+        self._write(".github/.invocare-generated-manifest", "agents/reviewer.md\n")
         self._write(".github/prompts/copilot-only.prompt.md", "# Keep me\n")
 
     def tearDown(self):
@@ -118,45 +121,45 @@ class WorkspaceToCopilotTest(unittest.TestCase):
         expected = [
             ".github/instructions/output-guardian.instructions.md",
             ".github/agents/reviewer.md",
-            ".github/prompts/create-spec.prompt.md",
-            ".github/prompts/create-spec-checker.prompt.md",
-            ".github/prompts/references/create-spec/spec.md",
-            ".github/prompts/create-validation.prompt.md",
-            ".github/prompts/references/create-validation/validation.md",
-            ".github/prompts/references/_shared/checker-contract.md",
-            ".github/prompts/_shared/references/firebase-db-map.md",
-            ".github/prompts/references/_shared/deploy-result-template.md",
+            ".github/skills/create-spec/SKILL.md",
+            ".github/skills/create-spec/checker-prompt.md",
+            ".github/skills/create-spec/references/spec.md",
+            ".github/skills/create-validation/SKILL.md",
+            ".github/skills/create-validation/references/validation.md",
+            ".github/skills/_shared/contracts/checker-contract.md",
+            ".github/skills/_shared/references/firebase-db-map.md",
+            ".github/skills/_shared/templates/deploy-result-template.md",
         ]
         for relative_path in expected:
             target_path = relative_path.removeprefix(".github/")
             self.assertTrue((self.target / target_path).is_file(), relative_path)
 
-        prompt = (self.target / "prompts/create-spec.prompt.md").read_text()
-        self.assertIn("./references/create-spec/spec.md", prompt)
-        self.assertIn("./references/create-validation/validation.md", prompt)
-        self.assertIn("./references/_shared/deploy-result-template.md", prompt)
-        self.assertIn(".github/instructions/output-guardian.instructions.md", prompt)
+        skill = (self.target / "skills/create-spec/SKILL.md").read_text()
+        self.assertIn("./references/spec.md", skill)
+        self.assertIn("../create-validation/references/validation.md", skill)
+        self.assertIn("../_shared/templates/deploy-result-template.md", skill)
+        self.assertIn(".github/instructions/output-guardian.instructions.md", skill)
 
-    def test_rewrites_sibling_directory_links_for_any_skill(self):
+    def test_preserves_sibling_directory_links_for_any_skill(self):
         result = self._run()
         self.assertEqual(result.returncode, 0, result.stderr)
-        prompt = (self.target / "prompts/create-spec.prompt.md").read_text()
+        skill = (self.target / "skills/create-spec/SKILL.md").read_text()
         for expected in (
-            "./references/ticket-status/workflow-template.md",
-            "./references/apply-fix/session-log-template.md",
-            "./references/_shared/checker-contract.md",
-            "./_shared/references/firebase-db-map.md",
+            "../ticket-status/references/workflow-template.md",
+            "../_shared/templates/session-log-template.md",
+            "../_shared/contracts/checker-contract.md",
+            "../_shared/references/firebase-db-map.md",
         ):
-            self.assertIn(expected, prompt)
-        self.assertNotIn("../ticket-status/", prompt)
-        self.assertNotIn("../apply-fix/", prompt)
-        self.assertNotIn("../_shared/", prompt)
-        # The apply-fix target is alias-backed out of _shared/templates.
+            self.assertIn(expected, skill)
+            self.assertTrue(
+                (self.target / "skills/create-spec" / expected).is_file(), expected
+            )
+        self.assertNotIn("./references/ticket-status/", skill)
         self.assertTrue(
-            (self.target / "prompts/references/apply-fix/session-log-template.md").is_file()
+            (self.target / "skills/_shared/templates/session-log-template.md").is_file()
         )
 
-    def test_skill_owned_template_does_not_collide_with_alias(self):
+    def test_skill_owned_templates_do_not_collide_across_skills(self):
         self._write(
             ".claude/skills/create-spec/references/validation-template.md",
             "# Spec-owned\n",
@@ -167,8 +170,10 @@ class WorkspaceToCopilotTest(unittest.TestCase):
         )
         result = self._run()
         self.assertEqual(result.returncode, 0, result.stderr)
-        owned = self.target / "prompts/references/create-spec/validation-template.md"
+        owned = self.target / "skills/create-spec/references/validation-template.md"
+        other = self.target / "skills/create-validation/references/validation-template.md"
         self.assertEqual(owned.read_text(), "# Spec-owned\n")
+        self.assertEqual(other.read_text(), "# Validation-owned\n")
 
     def test_preserves_already_correct_parent_traversal_from_references(self):
         self._write(
@@ -177,27 +182,76 @@ class WorkspaceToCopilotTest(unittest.TestCase):
         )
         result = self._run()
         self.assertEqual(result.returncode, 0, result.stderr)
-        nested = (self.target / "prompts/references/create-spec/nested.md").read_text()
+        nested = (self.target / "skills/create-spec/references/nested.md").read_text()
         self.assertIn("../../_shared/references/firebase-db-map.md", nested)
 
-    def test_preserves_copilot_frontmatter_and_unmapped_files(self):
+    def test_source_metadata_replaces_owned_frontmatter_and_preserves_unmapped_files(self):
         result = self._run()
         self.assertEqual(result.returncode, 0, result.stderr)
         agent = (self.target / "agents/reviewer.md").read_text()
-        self.assertIn("description: Copilot reviewer", agent)
-        self.assertIn("tools: ['search']", agent)
-        self.assertNotIn("name: reviewer", agent)
+        metadata = yaml.safe_load(agent.split("---\n")[1])
+        self.assertEqual(metadata["description"], "Source reviewer")
+        self.assertEqual(metadata["name"], "reviewer")
+        self.assertEqual(len(metadata["tools"]), 1)
+        self.assertIn(metadata["tools"][0].lower(), {"read", "view"})
+        self.assertNotIn("Copilot reviewer", agent)
         self.assertEqual(
             (self.target / "prompts/copilot-only.prompt.md").read_text(),
             "# Keep me\n",
         )
+
+    def test_unmanaged_agent_frontmatter_is_not_silently_overwritten(self):
+        (self.target / ".invocare-generated-manifest").unlink()
+        destination = self.target / "agents/reviewer.md"
+        original = destination.read_bytes()
+        for mode in ((), ("--dry-run",), ("--check",), ("--prune",)):
+            with self.subTest(mode=mode):
+                result = self._run(*mode)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("unmanaged agent", result.stderr)
+                self.assertEqual(destination.read_bytes(), original)
+                self.assertFalse((self.target / "skills").exists())
+                self.assertFalse((self.target / ".invocare-generated-manifest").exists())
+
+    def test_unmanaged_rule_scope_is_not_silently_overwritten(self):
+        self._write(
+            ".github/instructions/output-guardian.instructions.md",
+            "---\napplyTo: docs/**\ndescription: Local policy\n---\n# Keep\n",
+        )
+        destination = self.target / "instructions/output-guardian.instructions.md"
+        original = destination.read_bytes()
+        result = self._run()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unmanaged rule", result.stderr)
+        self.assertEqual(destination.read_bytes(), original)
+        self.assertFalse((self.target / "skills").exists())
+
+    def test_versioned_profile_is_authoritative_on_repeated_generation(self):
+        self._write(
+            ".claude/copilot/agents/reviewer.yaml",
+            "description: Explicit Copilot reviewer\ntools: [view]\nmodel: null\n",
+        )
+        first = self._run()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self._write(
+            ".github/agents/reviewer.md",
+            "---\ndescription: Target-only edit\ntools: [bash]\n---\n# Old\n",
+        )
+        second = self._run()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        agent = (self.target / "agents/reviewer.md").read_text()
+        metadata = yaml.safe_load(agent.split("---\n")[1])
+        self.assertEqual(metadata["description"], "Explicit Copilot reviewer")
+        self.assertEqual(metadata["tools"], ["view"])
+        self.assertNotIn("model", metadata)
+        self.assertNotIn("Target-only edit", agent)
 
     def test_dry_run_and_check_report_drift_without_writing(self):
         dry_run = self._run("--dry-run")
         self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
         self.assertIn("would create", dry_run.stdout)
         self.assertFalse(
-            (self.target / "prompts/create-spec.prompt.md").exists()
+            (self.target / "skills/create-spec/SKILL.md").exists()
         )
         check = self._run("--check")
         self.assertNotEqual(check.returncode, 0)
@@ -217,7 +271,8 @@ class WorkspaceToCopilotTest(unittest.TestCase):
         self.assertIn("0 created, 0 updated", second.stdout)
 
     def test_rejects_symlink_destination(self):
-        destination = self.target / "prompts/create-spec.prompt.md"
+        destination = self.target / "skills/create-spec/SKILL.md"
+        destination.parent.mkdir(parents=True)
         destination.parent.mkdir(parents=True, exist_ok=True)
         outside = self.workspace / "outside.md"
         outside.write_text("unchanged\n")
@@ -241,7 +296,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         self._write(".claude/rules/base.md", "# Base\n")
         self._write(
             ".claude/agents/base.md",
-            "---\nname: base\ndescription: Base agent\n---\n# Base\n",
+            "---\nname: base\ndescription: Base agent\ntools: [Read]\n---\n# Base\n",
         )
         self._write(
             ".claude/skills/base/SKILL.md",
@@ -293,7 +348,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         paths = self._manifest_paths()
         self.assertIn("instructions/base.instructions.md", paths)
         self.assertIn("agents/base.md", paths)
-        self.assertIn("prompts/base.prompt.md", paths)
+        self.assertIn("skills/base/SKILL.md", paths)
 
     def test_manifest_paths_are_sorted(self):
         result = self._run()
@@ -313,7 +368,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         self._manifest_path().write_text(
             "agents/base.md\n"
             "instructions/base.instructions.md\n"
-            "prompts/base.prompt.md\n"
+            "skills/base/SKILL.md\n"
             "prompts/old-removed.prompt.md\n"
         )
         result = self._run("--check")
@@ -326,6 +381,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         # Create a stale file and add it to the manifest
         stale = self.target / "prompts" / "old-removed.prompt.md"
+        stale.parent.mkdir(parents=True, exist_ok=True)
         stale.write_text("# Old\n")
         manifest_paths = self._manifest_paths()
         manifest_paths.add("prompts/old-removed.prompt.md")
@@ -377,6 +433,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         # Add stale file
         stale = self.target / "prompts" / "preview-me.prompt.md"
+        stale.parent.mkdir(parents=True, exist_ok=True)
         stale.write_text("# Old\n")
         manifest_paths = self._manifest_paths()
         manifest_paths.add("prompts/preview-me.prompt.md")
@@ -435,6 +492,7 @@ class ManifestOwnershipTest(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         # Copilot-only file not in manifest
         copilot_only = self.target / "prompts" / "copilot-only.prompt.md"
+        copilot_only.parent.mkdir(parents=True, exist_ok=True)
         copilot_only.write_text("# Keep me\n")
         result = self._run("--prune")
         self.assertEqual(result.returncode, 0, result.stderr)

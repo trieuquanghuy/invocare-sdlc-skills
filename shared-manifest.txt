@@ -3,10 +3,13 @@
 # One item per line; lines starting with # and blank lines are ignored.
 # Add a new shared top-level file/dir here once and both flows pick it up — there is
 # no second list to keep in sync. The manifest itself is never copied into .claude/.
+# Core item names are case-sensitive. Personal settings, sync state, backups, hooks,
+# and CLAUDE.md are reserved because the installer handles or protects them separately.
 # NOTE: CLAUDE.md is intentionally NOT here — it's the workspace-ROOT entry point, generated
 # by remote-to-workspace.sh from the rules/ files (a managed block), not copied from the repo.
 rules
 agents
+copilot
 scripts
 skills
 HOW-TO-USE.md

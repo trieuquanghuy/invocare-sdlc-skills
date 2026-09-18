@@ -18,7 +18,7 @@ class CopilotSafetyTest(unittest.TestCase):
         self._write(".claude/rules/base.md", "# Base\n")
         self._write(
             ".claude/agents/base.md",
-            "---\nname: base\ndescription: Base agent\n---\n# Base\n",
+            "---\nname: base\ndescription: Base agent\ntools: [Read]\n---\n# Base\n",
         )
         self._write(
             ".claude/skills/base/SKILL.md",
@@ -64,7 +64,7 @@ class CopilotSafetyTest(unittest.TestCase):
         (conventional / ".github").mkdir()
         (conventional / ".claude/rules/base.md").write_text("# Base\n")
         (conventional / ".claude/agents/base.md").write_text(
-            "---\nname: base\ndescription: Base agent\n---\n# Base\n"
+            "---\nname: base\ndescription: Base agent\ntools: [Read]\n---\n# Base\n"
         )
         (conventional / ".claude/skills/base/SKILL.md").write_text(
             "---\nname: base\ndescription: Base prompt\n---\n# Base\n"
@@ -122,7 +122,7 @@ class CopilotSafetyTest(unittest.TestCase):
 
         self._write(
             ".claude/agents/base.md",
-            "---\nname: base\ndescription: Base agent\n---\n# Base\n",
+            "---\nname: base\ndescription: Base agent\ntools: [Read]\n---\n# Base\n",
         )
         self._write(".github/agents/base.md", "---\ndescription: Broken\n")
         destination_result = self._run()
@@ -162,11 +162,13 @@ class CopilotSafetyTest(unittest.TestCase):
         self._write(".claude/skills/_shared/templates/custom.md", "# Custom\n")
         result = self._run()
         self.assertEqual(result.returncode, 0, result.stderr)
-        prompt = (self.target / "prompts/base.prompt.md").read_text()
-        self.assertIn(".github/prompts/other.prompt.md", prompt)
-        self.assertIn(".github/prompts/references/_shared/custom.md", prompt)
+        destination = self.target / "skills/base/SKILL.md"
+        self.assertTrue(destination.is_file(), result.stdout)
+        skill = destination.read_text()
+        self.assertIn(".github/skills/other/SKILL.md", skill)
+        self.assertIn(".github/skills/_shared/templates/custom.md", skill)
 
-    def test_detects_destination_collisions(self):
+    def test_shared_templates_do_not_collide_with_skill_references(self):
         self._write(
             ".claude/skills/apply-fix/SKILL.md",
             "---\nname: apply-fix\ndescription: Apply\n---\n# Apply\n",
@@ -180,8 +182,9 @@ class CopilotSafetyTest(unittest.TestCase):
             "# Shared\n",
         )
         result = self._run("--dry-run")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("destination collisions", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("skills/apply-fix/references/session-log-template.md", result.stdout)
+        self.assertIn("skills/_shared/templates/session-log-template.md", result.stdout)
 
 class ManifestSafetyTest(unittest.TestCase):
     """Regression tests for manifest path safety validation (Task 1)."""
@@ -196,7 +199,7 @@ class ManifestSafetyTest(unittest.TestCase):
         self._write(".claude/rules/base.md", "# Base\n")
         self._write(
             ".claude/agents/base.md",
-            "---\nname: base\ndescription: Base agent\n---\n# Base\n",
+            "---\nname: base\ndescription: Base agent\ntools: [Read]\n---\n# Base\n",
         )
         self._write(
             ".claude/skills/base/SKILL.md",
@@ -248,6 +251,7 @@ class ManifestSafetyTest(unittest.TestCase):
         outside = self.workspace / "outside.md"
         outside.write_text("# Outside\n")
         link = self.target / "prompts" / "symlinked.prompt.md"
+        link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(outside)
         self._apply_and_seed_manifest(["prompts/symlinked.prompt.md"])
         result = self._run("--prune")
@@ -260,6 +264,22 @@ class ManifestSafetyTest(unittest.TestCase):
         result = self._run("--prune")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("absolute", result.stderr)
+
+    def test_manifest_rejects_symlinked_parent_before_prune(self):
+        self._apply_and_seed_manifest([])
+        outside = self.workspace / "outside-legacy"
+        outside.mkdir()
+        protected = outside / "old.prompt.md"
+        protected.write_text("# Keep outside\n")
+        (self.target / "legacy").symlink_to(outside, target_is_directory=True)
+        manifest = self.target / self.MANIFEST
+        manifest.write_text(manifest.read_text() + "legacy/old.prompt.md\n")
+
+        result = self._run("--prune")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr)
+        self.assertEqual(protected.read_text(), "# Keep outside\n")
 
     def test_manifest_rejects_escaping_path_before_prune(self):
         self._apply_and_seed_manifest(["../escape.md"])

@@ -35,19 +35,32 @@ prefixed twice.
 Coverage is the load-bearing check: every file in the diff must land in at
 least one artifact, and (when "lenses" is given) every artifact must be read by
 at least one lens. Either violation exits 2 — a file no lens reads is a defect
-nobody can find.
+nobody can find. Coverage is checked before creating the output directory or
+replacing any artifacts or their plan.
 """
 
 from __future__ import annotations
 
 import argparse
+import codecs
 import json
 import re
 import sys
 from collections import OrderedDict
 from pathlib import Path
 
-FILE_HEADER = re.compile(r"^diff --git (?:\"?a/(?P<a>.+?)\"?) (?:\"?b/(?P<b>.+?)\"?)$")
+FILE_HEADER = re.compile(
+    r'^diff --git (?P<a>"a/(?:[^"\\]|\\.)*"|a/.+?) '
+    r'(?P<b>"b/(?:[^"\\]|\\.)*"|b/.+)$'
+)
+
+
+def unquote_git_path(path: str) -> str:
+    """Decode Git's C quoting: octal escapes represent filename bytes."""
+    if not path.startswith('"'):
+        return path
+    encoded = path[1:-1].encode("utf-8")
+    return codecs.escape_decode(encoded)[0].decode("utf-8", errors="surrogateescape")
 
 
 def parse_diff(text: str) -> "OrderedDict[str, str]":
@@ -66,7 +79,9 @@ def parse_diff(text: str) -> "OrderedDict[str, str]":
             buf = [line]
             m = FILE_HEADER.match(line.rstrip("\n"))
             if m:
-                path = m.group("b") if m.group("b") != "dev/null" else m.group("a")
+                path = unquote_git_path(m.group("b"))[2:]
+                if path == "dev/null":
+                    path = unquote_git_path(m.group("a"))[2:]
             else:  # unparseable header — keep the section under a stable key
                 path = line.rstrip("\n")
         else:
@@ -155,6 +170,22 @@ def main() -> int:
     unknown = sorted({p for paths in artifacts.values() for p in paths} - set(sections))
     assigned = {p for paths in artifacts.values() for p in paths}
     unassigned = [p for p in sections if p not in assigned]
+    lenses = plan.get("lenses") or {}
+    read_artifacts = {str(a) for ids in lenses.values() for a in ids}
+    unread = sorted(set(artifacts) - read_artifacts) if lenses else []
+
+    if unassigned:
+        print("ERROR: files in the diff assigned to NO artifact — every lens would be blind to them:", file=sys.stderr)
+        for p in unassigned:
+            print(f"  {p}", file=sys.stderr)
+    if unread:
+        print(f"ERROR: artifact(s) {', '.join(unread)} are read by no lens — assign them or drop them.", file=sys.stderr)
+    if unknown:
+        print("WARNING: plan names paths absent from the diff (typo, or a stale plan):", file=sys.stderr)
+        for p in unknown:
+            print(f"  {p}", file=sys.stderr)
+    if unassigned or unread:
+        return 2
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -165,10 +196,6 @@ def main() -> int:
         target.write_text(body, encoding="utf-8")
         written.append((target, len(artifacts[key]), len(body.encode("utf-8"))))
 
-    lenses = plan.get("lenses") or {}
-    read_artifacts = {str(a) for ids in lenses.values() for a in ids}
-    unread = sorted(set(artifacts) - read_artifacts) if lenses else []
-
     (out_dir / "artifact-plan.json").write_text(
         json.dumps({"diff": str(diff_path), "artifacts": artifacts, "lenses": lenses}, indent=2) + "\n",
         encoding="utf-8",
@@ -178,21 +205,7 @@ def main() -> int:
         print(f"wrote {target}  ({nfiles} file(s), {nbytes}B)")
     print(f"plan recorded at {out_dir / 'artifact-plan.json'}")
 
-    failed = False
-    if unassigned:
-        print("ERROR: files in the diff assigned to NO artifact — every lens would be blind to them:", file=sys.stderr)
-        for p in unassigned:
-            print(f"  {p}", file=sys.stderr)
-        failed = True
-    if unread:
-        print(f"ERROR: artifact(s) {', '.join(unread)} are read by no lens — assign them or drop them.", file=sys.stderr)
-        failed = True
-    if unknown:
-        print("WARNING: plan names paths absent from the diff (typo, or a stale plan):", file=sys.stderr)
-        for p in unknown:
-            print(f"  {p}", file=sys.stderr)
-
-    return 2 if failed else 0
+    return 0
 
 
 if __name__ == "__main__":

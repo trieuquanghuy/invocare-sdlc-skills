@@ -322,11 +322,18 @@ SPLITTER:         <absolute path to split_review_artifacts.py>
 >    path + the diff path(s) + `./review-artifacts/ticket-intent.md` + the output contract + "return your findings as a
 >    fenced JSON array as the LAST block of your reply" (A4). Name the tools explicitly per the Subagent Protocol —
 >    subagents do not inherit tool preferences.
+>    Read `.claude/rules/code-quality.md` from the installed configuration and inline CQ1 (RC-8) and CQ12 as separate
+>    local policy context in each dispatch. Keep the server's lens and output contract verbatim; apply these checks only
+>    where relevant to that lens. Depth records cross-file questions/signals; breadth follows the affected siblings and
+>    other writers. Missing source coverage is an explicit gap, not a pass. No additional edit or write authority is granted.
 > 4. **You merge.** Apply the block's dedup rules across the N packets yourself, keep every field the output contract
 >    demands, and assemble one `codeReviewJson` in the server's schema. Write it to `./review-artifacts/code-review-result.json`
 >    as evidence **before** the gate, and keep each raw packet alongside it. A4 applies: a specialist returning prose
 >    with no JSON block is a **dispatch failure** — re-dispatch it with the contract restated; do not parse the prose.
 >    A3 applies: their findings are hypotheses, and PASS A at STEP 4.5 is where you open the code for every one of them.
+>    Resolve guard-state and writer-coverage questions/signals before GATE 1. The coordinator owns this read-only
+>    follow-up even with no breadth lens. Carry unresolved coverage into GATE 1 as an explicit gap, not a clean check;
+>    do not invent findings or add unsupported fields to the server's result schema.
 > 5. **Other nodes are single-prompt and fast** — keep running their blocks as returned, in the foreground. Those blocks
 >    exit non-zero from their heartbeat-subshell `kill`/`wait` even when `claude` succeeded; check the `claude_exit=0`
 >    marker / the output file, not the script exit code.
@@ -922,8 +929,9 @@ Each iteration `i` (starting at 1):
    ```
 
    The plan stays the server's; only the bytes are re-cut. The coverage check then earns its keep: it fails closed
-   (exit 2) on a file the fix newly touched that the pinned plan does not name — a real event, since a fix can add a file
-   the server never planned for. Assign it and say so in the gate block.
+   (exit 2, leaving the current artifacts and plan untouched) on a file the fix newly touched that the pinned plan does
+   not name — a real event, since a fix can add a file the server never planned for. Assign it and say so in the gate
+   block. Pinned paths use the actual filenames; the helper decodes Git's quoted-path escapes when matching the diff.
 
    Two consequences worth stating plainly. Keyed by the server's own `artifact-N`, the re-split writes those same
    filenames back (the script does not re-prefix a key that already carries it), so **file membership and paths match the
